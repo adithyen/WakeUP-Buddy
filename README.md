@@ -68,7 +68,7 @@ WakeUP-Buddy is built on **Flutter Riverpod** using feature-first modular archit
 
 ```mermaid
 flowchart TD
-    subgraph UI ["Presentation Layer (Flutter Riverpod)"]
+    subgraph UI ["Presentation Layer - Flutter Riverpod"]
         HomeScreen["Home View & Map Canvas"]
         SearchScreen["Place Autocomplete & Routing"]
         ActiveTrip["Active Trip Live Tracking"]
@@ -76,10 +76,10 @@ flowchart TD
     end
 
     subgraph CoreServices ["Core Services Layer"]
-        LocService["Location Stream Service\n(Geolocator / Foreground Task)"]
-        MapService["Map Tile Provider\n(Ola Maps / OSM Fallback)"]
-        AlarmService["Audio & Haptic Engine\n(Just Audio / Vibration)"]
-        StorageService["Hive Local Storage\n(Trips / Favorites / Config)"]
+        LocService["Location Stream Service (Geolocator / Foreground Task)"]
+        MapService["Map Tile Provider (Ola Maps / OSM Fallback)"]
+        AlarmService["Audio & Haptic Engine (Just Audio / Vibration)"]
+        StorageService["Hive Local Storage (Trips / Favorites / Config)"]
     end
 
     subgraph HardwareOS ["Android System & Hardware"]
