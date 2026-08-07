@@ -1,0 +1,116 @@
+name: wakeup_buddy
+description: "A smart location-based alarm for commuters. Never miss your stop again."
+publish_to: 'none'
+
+version: 2.0.0+2
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.4.0
+
+  # Map & Location
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  geolocator: ^14.0.3
+  geocoding: ^5.0.0
+
+  # HTTP & API
+  dio: ^5.7.0
+
+  # Permissions
+  permission_handler: ^12.0.3
+  device_info_plus: ^13.2.0
+
+  # Background Service
+  flutter_foreground_task: ^9.2.2
+
+  # Alarm & Audio
+  alarm: ^5.5.0
+  just_audio: ^0.9.40
+  vibration: ^3.2.0
+
+  # Storage
+  hive: ^2.2.0
+  hive_flutter: ^1.1.0
+  shared_preferences: ^2.2.0
+
+  # UI Utilities
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+  shimmer: ^3.0.0
+  gap: ^3.0.1
+  flutter_svg: ^2.0.10+1
+
+  # Utilities
+  uuid: ^4.4.2
+  intl: ^0.19.0
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  flutter_polyline_points: ^2.1.0
+
+
+dependency_overrides:
+  flutter_fgbg: ^0.6.0
+  win32: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.0
+  build_runner: ^2.4.0
+  mocktail: ^1.0.0
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.0
+
+  integration_test:
+    sdk: flutter
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  assets:
+    - assets/sounds/
+    - assets/images/
+
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic
+  #   - family: Trajan Pro
+  #     fonts:
+  #       - asset: fonts/TrajanPro.ttf
+  #       - asset: fonts/TrajanPro_Bold.ttf
+  #         weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package
