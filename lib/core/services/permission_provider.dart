@@ -172,7 +172,7 @@ class PermissionStateNotifier extends StateNotifier<PermissionState> {
   }
 
   Future<void> completeOnboarding() async {
-    if (!state.allCriticalGranted) {
+    if (!state.foregroundLocation) {
       return;
     }
 

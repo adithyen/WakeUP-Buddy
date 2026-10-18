@@ -4,6 +4,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/services/ola_maps_service.dart';
 import '../../alert_config/data/models/alert_settings.dart';
 import '../../destination/data/models/destination.dart';
 import '../../destination/data/models/place_suggestion.dart';
@@ -11,11 +12,18 @@ import '../data/models/trip_state.dart';
 import '../services/tracking_service.dart';
 
 final trackingProvider = StateNotifierProvider<TrackingNotifier, TripState>((ref) {
-  return TrackingNotifier();
+  final olaService = ref.watch(olaMapsServiceProvider);
+  return TrackingNotifier(olaService: olaService);
 });
 
 class TrackingNotifier extends StateNotifier<TripState> {
-  TrackingNotifier() : super(const TripState()) {
+  final OlaMapsService _olaService;
+  DateTime? _lastRerouteTime;
+  bool _isRerouting = false;
+
+  TrackingNotifier({required OlaMapsService olaService})
+      : _olaService = olaService,
+        super(const TripState()) {
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     unawaited(_restoreActiveTrip());
   }
@@ -26,7 +34,11 @@ class TrackingNotifier extends StateNotifier<TripState> {
     super.dispose();
   }
 
-  Future<bool> startTrip(Destination destination, AlertSettings alertSettings) async {
+  Future<bool> startTrip(
+    Destination destination,
+    AlertSettings alertSettings, {
+    OlaRoute? chosenRoute,
+  }) async {
     if (state.isActive) {
       return true;
     }
@@ -36,6 +48,10 @@ class TrackingNotifier extends StateNotifier<TripState> {
       destination: destination,
       alertSettings: alertSettings,
       tripStartTime: DateTime.now(),
+      routePolyline: chosenRoute?.polyline ?? const [],
+      routeDurationSeconds: chosenRoute?.durationSeconds,
+      routeDistanceMeters: chosenRoute?.distanceMeters,
+      initialDistanceMeters: chosenRoute?.distanceMeters.toDouble(),
     );
 
     final bool started = await TrackingService.startTracking(
@@ -94,31 +110,47 @@ class TrackingNotifier extends StateNotifier<TripState> {
   }
 
   void _handleLocationUpdate(Map data) {
-    final double? distance = _toDouble(data['distance']);
+    final double? rawDistance = _toDouble(data['distance']);
     final double? latitude = _toDouble(data['latitude']);
     final double? longitude = _toDouble(data['longitude']);
     final double? speed = _toDouble(data['speed']);
     final double? accuracy = _toDouble(data['accuracy']);
     final DateTime? timestamp = _toDateTime(data['timestamp']);
 
-    if (distance == null || latitude == null || longitude == null) {
+    if (rawDistance == null || latitude == null || longitude == null) {
       return;
     }
 
+    final currentPos = LatLng(latitude, longitude);
+
+    // 1. Calculate route-based remaining distance
+    double effectiveDistance = rawDistance;
+    if (state.routePolyline.isNotEmpty) {
+      effectiveDistance = _calculateRemainingRouteDistance(currentPos, state.routePolyline);
+
+      // 2. Off-route / bus diversion check
+      _checkAndRerouteIfDiverted(currentPos);
+    }
+
     final double alertRadius = state.alertSettings?.alertRadiusMeters ?? 500;
-    final TripStatus nextStatus = distance <= alertRadius * 2
-        ? TripStatus.approaching
-        : TripStatus.tracking;
+    final TripStatus nextStatus;
+    if (effectiveDistance <= alertRadius) {
+      nextStatus = TripStatus.alerting;
+    } else if (effectiveDistance <= alertRadius * 2) {
+      nextStatus = TripStatus.approaching;
+    } else {
+      nextStatus = TripStatus.tracking;
+    }
 
     final List<LatLng> breadcrumbs = <LatLng>[
       ...state.breadcrumbs,
-      LatLng(latitude, longitude),
+      currentPos,
     ];
 
     state = state.copyWith(
       status: nextStatus,
-      currentDistanceMeters: distance,
-      initialDistanceMeters: state.initialDistanceMeters ?? distance,
+      currentDistanceMeters: effectiveDistance,
+      initialDistanceMeters: state.initialDistanceMeters ?? effectiveDistance,
       currentLatitude: latitude,
       currentLongitude: longitude,
       currentSpeedMs: speed,
@@ -129,6 +161,81 @@ class TrackingNotifier extends StateNotifier<TripState> {
           : breadcrumbs,
       clearError: true,
     );
+  }
+
+  double _calculateRemainingRouteDistance(LatLng current, List<LatLng> polyline) {
+    if (polyline.isEmpty) return 0.0;
+    if (polyline.length == 1) {
+      return const Distance().as(LengthUnit.Meter, current, polyline.first);
+    }
+
+    const dist = Distance();
+    int closestIdx = 0;
+    double minDistance = double.infinity;
+
+    for (int i = 0; i < polyline.length; i++) {
+      final d = dist.as(LengthUnit.Meter, current, polyline[i]);
+      if (d < minDistance) {
+        minDistance = d;
+        closestIdx = i;
+      }
+    }
+
+    double total = dist.as(LengthUnit.Meter, current, polyline[closestIdx]);
+    for (int i = closestIdx; i < polyline.length - 1; i++) {
+      total += dist.as(LengthUnit.Meter, polyline[i], polyline[i + 1]);
+    }
+    return total;
+  }
+
+  void _checkAndRerouteIfDiverted(LatLng currentPos) {
+    if (_isRerouting || state.destination == null) return;
+
+    final dest = LatLng(state.destination!.latitude, state.destination!.longitude);
+    const dist = Distance();
+
+    // Check distance to closest polyline vertex
+    double minVertexDist = double.infinity;
+    for (final pt in state.routePolyline) {
+      final d = dist.as(LengthUnit.Meter, currentPos, pt);
+      if (d < minVertexDist) {
+        minVertexDist = d;
+      }
+    }
+
+    // If diverged by more than 75m, trigger dynamic rerouting
+    if (minVertexDist > 75.0) {
+      final now = DateTime.now();
+      if (_lastRerouteTime == null || now.difference(_lastRerouteTime!).inSeconds > 15) {
+        _lastRerouteTime = now;
+        _performDynamicReroute(currentPos, dest);
+      }
+    }
+  }
+
+  Future<void> _performDynamicReroute(LatLng currentPos, LatLng destination) async {
+    _isRerouting = true;
+    try {
+      final routes = await _olaService.getDirections(
+        origin: currentPos,
+        destination: destination,
+        alternatives: false,
+      );
+
+      if (routes.isNotEmpty) {
+        final newRoute = routes.first;
+        state = state.copyWith(
+          routePolyline: newRoute.polyline,
+          routeDurationSeconds: newRoute.durationSeconds,
+          routeDistanceMeters: newRoute.distanceMeters,
+          isOffRoute: false,
+        );
+      }
+    } catch (_) {
+      state = state.copyWith(isOffRoute: true);
+    } finally {
+      _isRerouting = false;
+    }
   }
 
   void _handleAlertTriggered(Map data) {
@@ -198,61 +305,40 @@ class TrackingNotifier extends StateNotifier<TripState> {
       longitude: longitude,
       selectedAt: DateTime.now(),
       source: PlaceSource.values.firstWhere(
-        (PlaceSource option) => option.name == sourceName,
-        orElse: () => PlaceSource.nominatim,
+        (PlaceSource s) => s.name == sourceName,
+        orElse: () => PlaceSource.ola,
       ),
     );
   }
 
   AlertSettings? _alertSettingsFromData(Map<String, Object> data) {
     final double? radius = _toDouble(data[TrackingService.alertRadiusKey]);
+    final String? soundId = data[TrackingService.alertSoundIdKey]?.toString();
     final String? soundSource = data[TrackingService.alertSoundSourceKey]?.toString();
-
-    if (radius == null) {
-      return null;
-    }
+    final String? customPath = data[TrackingService.alertCustomSoundPathKey]?.toString();
+    final bool? vibrate = data[TrackingService.alertVibrateEnabledKey] as bool?;
 
     return AlertSettings(
-      alertRadiusMeters: radius,
-      alarmSoundId: data[TrackingService.alertSoundIdKey]?.toString() ?? 'freesound_community-alarm-clock-90867',
+      alertRadiusMeters: radius ?? 500,
+      alarmSoundId: soundId ?? 'freesound_community-alarm-clock-90867',
       soundSource: AlarmSoundSource.values.firstWhere(
-        (AlarmSoundSource option) => option.name == soundSource,
+        (e) => e.name == soundSource,
         orElse: () => AlarmSoundSource.bundled,
       ),
-      customSoundPath: data[TrackingService.alertCustomSoundPathKey]?.toString(),
-      vibrateEnabled: data[TrackingService.alertVibrateEnabledKey] as bool? ?? true,
-      vibrationDurationMs: (data[TrackingService.alertVibrationDurationKey] as num?)?.toInt() ?? 7000,
-      vibrationPreDelayMs: (data[TrackingService.alertVibrationPreDelayKey] as num?)?.toInt() ?? 6000,
-      alarmVolume: _toDouble(data[TrackingService.alertVolumeKey]) ?? 0.9,
-      wearableVolume: _toDouble(data[TrackingService.alertWearableVolumeKey]) ?? 0.7,
-      loopAlarm: data[TrackingService.alertLoopKey] as bool? ?? true,
-      fullScreenAlert: data[TrackingService.alertFullScreenKey] as bool? ?? true,
-      snoozeRadiusMeters: _toDouble(data[TrackingService.alertSnoozeRadiusKey]) ?? 500,
+      customSoundPath: customPath,
+      vibrateEnabled: vibrate ?? true,
     );
   }
 
   double? _toDouble(Object? value) {
-    if (value is double) {
-      return value;
-    }
-
-    if (value is int) {
-      return value.toDouble();
-    }
-
-    if (value is num) {
-      return value.toDouble();
-    }
-
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
     return null;
   }
 
   DateTime? _toDateTime(Object? value) {
-    final int? milliseconds = value is int ? value : int.tryParse(value?.toString() ?? '');
-    if (milliseconds == null) {
-      return null;
-    }
-
-    return DateTime.fromMillisecondsSinceEpoch(milliseconds);
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is String) return DateTime.tryParse(value);
+    return null;
   }
 }

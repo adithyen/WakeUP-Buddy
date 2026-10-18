@@ -176,6 +176,19 @@ class SelectedDestinationNotifier extends StateNotifier<Destination?> {
     await prefs.setString('selected_destination_source', destination.source.name);
   }
 
+  Future<void> select(Destination destination) async {
+    state = destination;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('selected_destination_id', destination.id);
+    await prefs.setString('selected_destination_name', destination.name);
+    await prefs.setString('selected_destination_description', destination.description ?? '');
+    await prefs.setDouble('selected_destination_lat', destination.latitude);
+    await prefs.setDouble('selected_destination_lng', destination.longitude);
+    await prefs.setString('selected_destination_source', destination.source.name);
+  }
+
+  Future<void> clear() => clearDestination();
+
   Future<void> clearDestination() async {
     state = null;
     final SharedPreferences prefs = await SharedPreferences.getInstance();

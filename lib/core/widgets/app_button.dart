@@ -45,7 +45,20 @@ class _AppButtonState extends State<AppButton> {
           horizontal: widget.isFullWidth ? AppDimensions.xl : AppDimensions.xxxl,
         ),
         decoration: BoxDecoration(
-          gradient: widget.variant == AppButtonVariant.primary ? AppColors.primaryGradient : null,
+          gradient: widget.variant == AppButtonVariant.primary
+              ? LinearGradient(
+                  colors: [
+                    colorScheme.primary,
+                    HSLColor.fromColor(colorScheme.primary)
+                        .withLightness(
+                            (HSLColor.fromColor(colorScheme.primary).lightness * 0.84)
+                                .clamp(0.0, 1.0))
+                        .toColor(),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
           color: widget.variant == AppButtonVariant.danger
               ? AppColors.accentDanger
               : widget.variant == AppButtonVariant.secondary
@@ -60,9 +73,9 @@ class _AppButtonState extends State<AppButton> {
           boxShadow: widget.variant == AppButtonVariant.primary
               ? [
                   BoxShadow(
-                    color: AppColors.primaryDark.withAlpha(51),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
+                    color: colorScheme.primary.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
                   ),
                 ]
               : null,
@@ -85,9 +98,20 @@ class _AppButtonState extends State<AppButton> {
                     ),
                   )
                 else if (widget.icon != null)
-                  Icon(widget.icon, size: AppDimensions.iconSizeMd),
+                  Icon(
+                    widget.icon,
+                    size: AppDimensions.iconSizeMd,
+                    color: _foregroundColor(colorScheme),
+                  ),
                 if (widget.icon != null || widget.isLoading) const SizedBox(width: AppDimensions.sm),
-                Text(widget.label),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    color: _foregroundColor(colorScheme),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
               ],
             ),
           ),
@@ -113,7 +137,7 @@ class _AppButtonState extends State<AppButton> {
 
   Color _foregroundColor(ColorScheme colorScheme) {
     return switch (widget.variant) {
-      AppButtonVariant.primary => Colors.white,
+      AppButtonVariant.primary => colorScheme.onPrimary,
       AppButtonVariant.secondary => colorScheme.primary,
       AppButtonVariant.danger => Colors.white,
       AppButtonVariant.ghost => colorScheme.primary,

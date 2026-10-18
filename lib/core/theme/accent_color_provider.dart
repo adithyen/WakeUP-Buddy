@@ -2,35 +2,56 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../constants/app_colors.dart';
+class AppAccentOption {
+  final int id;
+  final String name;
+  final Color color;
 
-const String _kAccentKey = 'selected_accent_color_index';
+  const AppAccentOption({
+    required this.id,
+    required this.name,
+    required this.color,
+  });
+}
 
-/// Provides the currently selected accent color index (0-6).
-final accentColorIndexProvider =
-    StateNotifierProvider<AccentColorNotifier, int>((ref) {
+const List<AppAccentOption> availableAccents = [
+  AppAccentOption(id: 0, name: 'Lime', color: Color(0xFFC6FF00)),
+  AppAccentOption(id: 1, name: 'Emerald', color: Color(0xFF00E676)),
+  AppAccentOption(id: 2, name: 'Cyan', color: Color(0xFF00E5FF)),
+  AppAccentOption(id: 3, name: 'Blue', color: Color(0xFF536DFE)),
+  AppAccentOption(id: 4, name: 'Pink', color: Color(0xFFE040FB)),
+  AppAccentOption(id: 5, name: 'Orange', color: Color(0xFFFF6D00)),
+  AppAccentOption(id: 6, name: 'Amber', color: Color(0xFFFFD600)),
+];
+
+final accentColorProvider =
+    StateNotifierProvider<AccentColorNotifier, AppAccentOption>((ref) {
   return AccentColorNotifier();
 });
 
-/// Provides the current accent Color value.
-final accentColorProvider = Provider<Color>((ref) {
-  final int index = ref.watch(accentColorIndexProvider);
-  return AppColors.accentPalette[index.clamp(0, AppColors.accentPalette.length - 1)];
-});
+class AccentColorNotifier extends StateNotifier<AppAccentOption> {
+  static const String _key = 'selected_accent_index';
 
-class AccentColorNotifier extends StateNotifier<int> {
-  AccentColorNotifier() : super(0) {
-    _load();
+  AccentColorNotifier() : super(availableAccents[0]) {
+    _loadAccent();
   }
 
-  Future<void> _load() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    state = prefs.getInt(_kAccentKey) ?? 0;
+  Future<void> _loadAccent() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final int index = prefs.getInt(_key) ?? 0;
+      if (index >= 0 && index < availableAccents.length) {
+        state = availableAccents[index];
+      }
+    } catch (_) {}
   }
 
-  Future<void> setIndex(int index) async {
-    state = index.clamp(0, AppColors.accentPalette.length - 1);
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_kAccentKey, state);
+  Future<void> setAccentIndex(int index) async {
+    if (index < 0 || index >= availableAccents.length) return;
+    state = availableAccents[index];
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_key, index);
+    } catch (_) {}
   }
 }

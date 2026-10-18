@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_dimensions.dart';
 import '../../alarm/providers/alarm_provider.dart';
+import '../../tracking/presentation/trip_completed_screen.dart';
 import '../../tracking/providers/tracking_provider.dart';
 import 'widgets/dismiss_slider.dart';
 
@@ -68,7 +69,17 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
 
   Future<void> _handleDismiss() async {
     await ref.read(alarmOrchestratorProvider.notifier).dismissAlarm();
-    if (mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder<void>(
+        pageBuilder: (BuildContext ctx, Animation<double> anim, _) =>
+            FadeTransition(
+          opacity: anim,
+          child: const TripCompletedScreen(),
+        ),
+        transitionDuration: const Duration(milliseconds: 400),
+      ),
+    );
   }
 
   Future<void> _handleSnooze() async {

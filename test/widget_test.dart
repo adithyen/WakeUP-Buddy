@@ -66,8 +66,8 @@ void main() {
     );
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('Permissions setup'), findsOneWidget);
-    expect(find.text('Allow location access'), findsOneWidget);
+    expect(find.text('Permissions Setup'), findsOneWidget);
+    expect(find.text('Location Access'), findsOneWidget);
     expect(find.text('Allow'), findsWidgets);
   });
 }

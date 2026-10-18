@@ -7,14 +7,14 @@ import '../constants/app_dimensions.dart';
 import '../constants/app_typography.dart';
 
 abstract final class AppTheme {
-  /// Build a theme using the dynamic accent color.
-  static ThemeData buildDarkTheme(Color accent) => _buildTheme(
+  static ThemeData buildDarkTheme(Color accentColor) => _buildTheme(
         brightness: Brightness.dark,
-        accent: accent,
         colorScheme: ColorScheme.dark(
-          primary: accent,
-          onPrimary: Colors.black,
-          secondary: AppColors.currentLocationActive,
+          primary: accentColor,
+          onPrimary: ThemeData.estimateBrightnessForColor(accentColor) == Brightness.light
+              ? Colors.black
+              : Colors.white,
+          secondary: AppColors.secondary,
           onSecondary: Colors.black,
           error: AppColors.error,
           onError: Colors.white,
@@ -26,31 +26,30 @@ abstract final class AppTheme {
         ),
       );
 
-  static ThemeData buildLightTheme(Color accent) => _buildTheme(
+  static ThemeData buildLightTheme(Color accentColor) => _buildTheme(
         brightness: Brightness.light,
-        accent: accent,
         colorScheme: ColorScheme.light(
-          primary: accent,
-          onPrimary: Colors.black,
-          secondary: AppColors.currentLocationActive,
+          primary: accentColor,
+          onPrimary: ThemeData.estimateBrightnessForColor(accentColor) == Brightness.light
+              ? Colors.black
+              : Colors.white,
+          secondary: AppColors.secondary,
           onSecondary: Colors.black,
           error: AppColors.error,
           onError: Colors.white,
-          surface: AppColors.lightBackground,
-          onSurface: AppColors.lightTextPrimary,
-          surfaceContainerHighest: AppColors.lightSurfaceVariant,
-          onSurfaceVariant: AppColors.lightTextSecondary,
-          outline: AppColors.lightBorder,
+          surface: const Color(0xFFF4F6F8),
+          onSurface: const Color(0xFF0F172A),
+          surfaceContainerHighest: const Color(0xFFEDF2F7),
+          onSurfaceVariant: const Color(0xFF64748B),
+          outline: const Color(0xFFE2E8F0),
         ),
       );
 
-  // Legacy static getters using default lime accent
-  static ThemeData get darkTheme => buildDarkTheme(AppColors.accent);
-  static ThemeData get lightTheme => buildLightTheme(AppColors.accent);
+  static ThemeData get darkTheme => buildDarkTheme(AppColors.limeAccent);
+  static ThemeData get lightTheme => buildLightTheme(AppColors.limeAccent);
 
   static ThemeData _buildTheme({
     required Brightness brightness,
-    required Color accent,
     required ColorScheme colorScheme,
   }) {
     final bool isDark = brightness == Brightness.dark;
@@ -62,39 +61,31 @@ abstract final class AppTheme {
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
       textTheme: textTheme,
-
       appBarTheme: AppBarTheme(
-        backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
         foregroundColor: colorScheme.onSurface,
         titleTextStyle: textTheme.headlineSmall?.copyWith(
           color: colorScheme.onSurface,
-          fontWeight: FontWeight.w700,
         ),
-        iconTheme: IconThemeData(color: accent),
       ),
-
       cardTheme: CardThemeData(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        color: colorScheme.surface,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-          side: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
+          side: BorderSide(color: colorScheme.outline),
         ),
       ),
-
       dividerTheme: DividerThemeData(
-        color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        color: colorScheme.outline,
         thickness: 1,
       ),
-
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        modalBackgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        backgroundColor: colorScheme.surface,
+        modalBackgroundColor: colorScheme.surface,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(
@@ -102,70 +93,51 @@ abstract final class AppTheme {
           ),
         ),
       ),
-
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: accent,
-          foregroundColor: Colors.black,
           minimumSize: const Size.fromHeight(AppDimensions.buttonHeight),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
           ),
-          textStyle: textTheme.labelLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: Colors.black,
-          ),
+          textStyle: textTheme.labelLarge,
         ),
       ),
-
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: accent,
           minimumSize: const Size.fromHeight(AppDimensions.buttonHeight),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
           ),
-          side: BorderSide(color: accent),
+          side: BorderSide(color: colorScheme.primary),
           textStyle: textTheme.labelLarge,
         ),
       ),
-
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: accent,
+          foregroundColor: colorScheme.primary,
           textStyle: textTheme.labelLarge,
         ),
       ),
-
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+        fillColor: colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-          borderSide: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
+          borderSide: BorderSide(color: colorScheme.outline),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-          borderSide: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
+          borderSide: BorderSide(color: colorScheme.outline),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
-          borderSide: BorderSide(color: accent, width: 1.5),
+          borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppDimensions.xl,
           vertical: AppDimensions.lg,
         ),
-        hintStyle: TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 15,
-        ),
       ),
-
       snackBarTheme: SnackBarThemeData(
         backgroundColor: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurface,
         contentTextStyle: textTheme.bodyMedium,
@@ -174,34 +146,15 @@ abstract final class AppTheme {
         ),
         behavior: SnackBarBehavior.floating,
       ),
-
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStatePropertyAll<Color>(accent),
+        thumbColor: WidgetStatePropertyAll<Color>(colorScheme.primary),
         trackColor: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
           if (states.contains(WidgetState.selected)) {
-            return accent.withAlpha(102);
+            return colorScheme.primary.withAlpha(102);
           }
-          return (isDark ? AppColors.darkBorder : AppColors.lightBorder).withAlpha(128);
+          return colorScheme.outline.withAlpha(77);
         }),
       ),
-
-      sliderTheme: SliderThemeData(
-        activeTrackColor: accent,
-        thumbColor: accent,
-        overlayColor: accent.withAlpha(30),
-        inactiveTrackColor: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-        valueIndicatorColor: accent,
-        valueIndicatorTextStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.w700),
-      ),
-
-      chipTheme: ChipThemeData(
-        backgroundColor: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
-        selectedColor: accent.withAlpha(40),
-        labelStyle: textTheme.labelSmall,
-        side: BorderSide(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      ),
-
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: <TargetPlatform, PageTransitionsBuilder>{
           TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
@@ -215,24 +168,51 @@ abstract final class AppTheme {
   }
 
   static TextTheme _buildTextTheme({required bool isDark}) {
-    final Color primary   = isDark ? AppColors.darkTextPrimary   : AppColors.lightTextPrimary;
+    final Color primary = isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
     final Color secondary = isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
-    final Color tertiary  = isDark ? AppColors.darkTextTertiary  : AppColors.lightTextTertiary;
-    final TextTheme base  = GoogleFonts.interTextTheme();
+    final Color tertiary = isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary;
+    final TextTheme base = GoogleFonts.interTextTheme();
 
     return base.copyWith(
-      displayLarge:  AppTypography.displayLarge.copyWith(color: primary),
+      displayLarge: AppTypography.displayLarge.copyWith(color: primary),
       displayMedium: AppTypography.displayMedium.copyWith(color: primary),
-      displaySmall:  AppTypography.displaySmall.copyWith(color: primary),
-      headlineLarge:  AppTypography.headlineLarge.copyWith(color: primary),
+      displaySmall: AppTypography.displaySmall.copyWith(color: primary),
+      headlineLarge: AppTypography.headlineLarge.copyWith(color: primary),
       headlineMedium: AppTypography.headlineMedium.copyWith(color: primary),
-      headlineSmall:  AppTypography.headlineSmall.copyWith(color: primary),
-      bodyLarge:  AppTypography.bodyLarge.copyWith(color: primary),
+      headlineSmall: AppTypography.headlineSmall.copyWith(color: primary),
+      bodyLarge: AppTypography.bodyLarge.copyWith(color: primary),
       bodyMedium: AppTypography.bodyMedium.copyWith(color: secondary),
-      bodySmall:  AppTypography.bodySmall.copyWith(color: tertiary),
-      labelLarge:  AppTypography.labelLarge.copyWith(color: primary),
+      bodySmall: AppTypography.bodySmall.copyWith(color: tertiary),
+      labelLarge: AppTypography.labelLarge.copyWith(color: primary),
       labelMedium: AppTypography.labelMedium.copyWith(color: secondary),
-      labelSmall:  AppTypography.labelSmall.copyWith(color: tertiary),
+      labelSmall: AppTypography.labelSmall.copyWith(color: tertiary),
     );
   }
+}
+
+extension AppThemeExtension on BuildContext {
+  bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
+
+  Color get appAccent => Theme.of(this).colorScheme.primary;
+
+  Color get appBackground =>
+      isDarkMode ? AppColors.obsidianBase : const Color(0xFFF4F6F8);
+
+  Color get appCard =>
+      isDarkMode ? AppColors.obsidianCard : Colors.white;
+
+  Color get appCardElevated =>
+      isDarkMode ? AppColors.obsidianElevated : const Color(0xFFEDF2F7);
+
+  Color get appBorder =>
+      isDarkMode ? AppColors.obsidianBorder : const Color(0xFFE2E8F0);
+
+  Color get appTextPrimary =>
+      isDarkMode ? Colors.white : const Color(0xFF0F172A);
+
+  Color get appTextSecondary =>
+      isDarkMode ? AppColors.darkTextSecondary : const Color(0xFF64748B);
+
+  Color get appTextTertiary =>
+      isDarkMode ? AppColors.darkTextTertiary : const Color(0xFF94A3B8);
 }

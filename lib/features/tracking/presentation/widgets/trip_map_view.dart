@@ -1,23 +1,22 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../../../core/constants/app_colors.dart';
-import '../../../../core/constants/app_dimensions.dart';
+import '../../../../core/constants/api_constants.dart';
+import '../../../../core/services/map_api_key_provider.dart';
+import '../../../../core/services/map_renderer_provider.dart';
 import '../../../../core/services/map_tile_provider.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../home/presentation/widgets/native_ola_map_view.dart';
 import '../../../home/providers/map_provider.dart';
 import '../../data/models/trip_state.dart';
 import '../../providers/tracking_provider.dart';
 
 /// Live map widget for the active trip screen.
-///
-/// Features:
-///   • Follows user position with smooth animated camera moves
-///   • Destination pin + alert radius circle centred on destination
-///   • Purple breadcrumb trail (last 200 points)
-///   • Auto-zoom based on distance to destination
-///   • Fits both markers in view via [_fitBothMarkers] when far away
+/// Renders native Ola Map on Android when selected, or high-performance FlutterMap (Vela/OSM).
 class TripMapView extends ConsumerStatefulWidget {
   const TripMapView({super.key});
 
@@ -27,8 +26,10 @@ class TripMapView extends ConsumerStatefulWidget {
 
 class _TripMapViewState extends ConsumerState<TripMapView> {
   final MapController _mapController = MapController();
+  OlaMapController? _nativeOlaController;
   LatLng? _lastPosition;
   bool _initialMoveCompleted = false;
+  bool _nativeOlaHasError = false;
 
   @override
   void dispose() {
@@ -49,6 +50,11 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
     if (position == _lastPosition) return;
     _lastPosition = position;
     _mapController.move(position, _zoomForDistance(distance));
+    _nativeOlaController?.moveCamera(
+      lat: position.latitude,
+      lng: position.longitude,
+      zoom: _zoomForDistance(distance),
+    );
   }
 
   void _fitBothMarkers(LatLng user, LatLng dest) {
@@ -56,19 +62,75 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
     _mapController.fitCamera(
       CameraFit.bounds(
         bounds: bounds,
-        padding: const EdgeInsets.all(60),
+        padding: const EdgeInsets.only(
+          left: 60,
+          right: 60,
+          top: 100,
+          bottom: 220,
+        ),
         maxZoom: 16,
       ),
     );
+    _nativeOlaController?.fitBounds(
+      points: [
+        [user.latitude, user.longitude],
+        [dest.latitude, dest.longitude],
+      ],
+      padding: 120,
+    );
+  }
+
+  void _syncNativeOlaState(TripState trip, Color accent) {
+    if (_nativeOlaController == null) return;
+    final hex =
+        '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+
+    if (trip.destination != null) {
+      final double radius = (trip.alertSettings?.alertRadiusMeters ?? 500)
+          .toDouble();
+      _nativeOlaController!.setDestination(
+        lat: trip.destination!.latitude,
+        lng: trip.destination!.longitude,
+        radiusMeters: radius,
+        colorHex: hex,
+      );
+    }
+
+    if (trip.currentLatitude != null && trip.currentLongitude != null) {
+      _nativeOlaController!.updateUserLocation(
+        lat: trip.currentLatitude!,
+        lng: trip.currentLongitude!,
+        colorHex: hex,
+      );
+    }
+
+    if (trip.routePolyline.isNotEmpty) {
+      final points = trip.routePolyline
+          .map((p) => <double>[p.latitude, p.longitude])
+          .toList(growable: false);
+      _nativeOlaController!.drawRoute(
+        points: points,
+        colorHex: hex,
+        width: 6.0,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final TripState trip = ref.watch(trackingProvider);
+    final MapRendererType renderer = ref.watch(mapRendererProvider);
     final MapTileConfig tileConfig = ref.watch(mapTileConfigProvider);
-    final AsyncValue<LatLng?> locationAsync = ref.watch(currentLocationProvider);
+    final AsyncValue<LatLng?> locationAsync = ref.watch(
+      currentLocationProvider,
+    );
+    final String apiKey =
+        ref.watch(mapApiKeyProvider) ?? ApiConstants.defaultOlaApiKey;
+    final bool isDark = ref.watch(isDarkMapProvider);
+    final Color accent = context.appAccent;
 
-    final LatLng? userPos = trip.currentLatitude != null && trip.currentLongitude != null
+    final LatLng? userPos =
+        trip.currentLatitude != null && trip.currentLongitude != null
         ? LatLng(trip.currentLatitude!, trip.currentLongitude!)
         : locationAsync.valueOrNull;
 
@@ -76,11 +138,13 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
         ? LatLng(trip.destination!.latitude, trip.destination!.longitude)
         : null;
 
-    // Animate camera to follow user on each update
+    // Follow user with camera
     if (userPos != null && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (!_initialMoveCompleted && destPos != null &&
+
+        if (!_initialMoveCompleted &&
+            destPos != null &&
             trip.currentDistanceMeters != null &&
             trip.currentDistanceMeters! > 2000) {
           _fitBothMarkers(userPos, destPos);
@@ -89,12 +153,14 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
           _moveToUser(userPos, trip.currentDistanceMeters);
           _initialMoveCompleted = true;
         }
+        _syncNativeOlaState(trip, accent);
       });
     }
 
-    final LatLng fallbackCenter = userPos ?? destPos ?? const LatLng(12.9716, 77.5946);
+    final LatLng fallbackCenter =
+        userPos ?? destPos ?? const LatLng(8.5241, 76.9366);
 
-    return RepaintBoundary(
+    final Widget flutterMapFallback = RepaintBoundary(
       child: FlutterMap(
         mapController: _mapController,
         options: MapOptions(
@@ -107,7 +173,6 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
           ),
         ),
         children: <Widget>[
-          // Base tile layer
           TileLayer(
             urlTemplate: tileConfig.urlTemplate,
             additionalOptions: tileConfig.additionalOptions,
@@ -117,10 +182,19 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
             maxNativeZoom: 18,
             keepBuffer: 2,
             panBuffer: 2,
-            tileUpdateTransformer: TileUpdateTransformers.debounce(
-              const Duration(milliseconds: 200),
-            ),
           ),
+
+          // Route polyline with dynamic accent color
+          if (trip.routePolyline.isNotEmpty)
+            PolylineLayer(
+              polylines: <Polyline>[
+                Polyline(
+                  points: trip.routePolyline,
+                  strokeWidth: 5.5,
+                  color: accent,
+                ),
+              ],
+            ),
 
           // Breadcrumb trail
           if (trip.breadcrumbs.length > 1)
@@ -129,22 +203,23 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
                 Polyline(
                   points: trip.breadcrumbs,
                   strokeWidth: 3.5,
-                  color: AppColors.currentLocationActive.withAlpha(180),
+                  color: accent.withValues(alpha: 0.65),
                 ),
               ],
             ),
 
           // Alert radius circle around destination
-          if (destPos != null && trip.alertSettings != null)
+          if (destPos != null)
             CircleLayer(
               circles: <CircleMarker>[
                 CircleMarker(
                   point: destPos,
-                  radius: trip.alertSettings!.alertRadiusMeters,
+                  radius: (trip.alertSettings?.alertRadiusMeters ?? 500)
+                      .toDouble(),
                   useRadiusInMeter: true,
-                  color: AppColors.alertRadius,
-                  borderColor: AppColors.alertRadiusBorder,
-                  borderStrokeWidth: 2,
+                  color: accent.withValues(alpha: 0.16),
+                  borderColor: accent,
+                  borderStrokeWidth: 2.2,
                 ),
               ],
             ),
@@ -155,53 +230,51 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
               markers: <Marker>[
                 Marker(
                   point: destPos,
-                  width: AppDimensions.mapPinSize,
-                  height: AppDimensions.mapPinSize,
-                  child: const Icon(
-                    Icons.location_on_rounded,
-                    color: AppColors.destinationPin,
-                    size: 44,
+                  width: 44,
+                  height: 44,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: accent.withValues(alpha: 0.7),
+                          blurRadius: 14,
+                          spreadRadius: 3,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.location_on_rounded,
+                      color: Colors.black,
+                      size: 26,
+                    ),
                   ),
                 ),
               ],
             ),
 
-          // Current location dot (pulsing effect via 2 stacked circles)
+          // User live location marker
           if (userPos != null)
             MarkerLayer(
               markers: <Marker>[
                 Marker(
                   point: userPos,
-                  width: 36,
-                  height: 36,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: <Widget>[
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: AppColors.currentLocationActive.withAlpha(50),
-                          shape: BoxShape.circle,
+                  width: 28,
+                  height: 28,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2.5),
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: accent.withValues(alpha: 0.8),
+                          blurRadius: 10,
+                          spreadRadius: 2,
                         ),
-                      ),
-                      Container(
-                        width: 16,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          color: AppColors.currentLocationActive,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2.5),
-                          boxShadow: <BoxShadow>[
-                            BoxShadow(
-                              color: AppColors.currentLocationActive.withAlpha(120),
-                              blurRadius: 8,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -209,11 +282,45 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
 
           RichAttributionWidget(
             attributions: <SourceAttribution>[
-              TextSourceAttribution(tileConfig.attribution, onTap: () {}),
+              TextSourceAttribution(tileConfig.attribution),
             ],
+            alignment: AttributionAlignment.bottomLeft,
           ),
         ],
       ),
     );
+
+    // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
+    if (renderer == MapRendererType.ola &&
+        !kIsWeb &&
+        Platform.isAndroid &&
+        !_nativeOlaHasError) {
+      final baseStyleUrl = isDark
+          ? ApiConstants.olaVectorStyleDark
+          : ApiConstants.olaVectorStyleLight;
+      final styleUrl = ApiConstants.olaStyleUrlWithApiKey(baseStyleUrl, apiKey);
+
+      return NativeOlaMapView(
+        initialLat: fallbackCenter.latitude,
+        initialLng: fallbackCenter.longitude,
+        initialZoom: _zoomForDistance(trip.currentDistanceMeters),
+        apiKey: apiKey,
+        styleUrl: styleUrl,
+        fallback: flutterMapFallback,
+        onMapReady: (controller) {
+          _nativeOlaController = controller;
+          _syncNativeOlaState(trip, accent);
+        },
+        onMapError: () {
+          if (mounted) {
+            setState(() {
+              _nativeOlaHasError = true;
+            });
+          }
+        },
+      );
+    }
+
+    return flutterMapFallback;
   }
 }

@@ -1,345 +1,308 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../../core/constants/app_colors.dart';
-import '../../../core/theme/accent_color_provider.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../alert_config/providers/alert_config_provider.dart';
-import '../../destination/presentation/widgets/destination_search_sheet.dart';
+import '../../destination/data/models/destination.dart';
+import '../../destination/data/models/place_suggestion.dart';
+import '../../destination/presentation/search_screen.dart';
 import '../../destination/providers/destination_provider.dart';
+import '../../destination/providers/route_selection_provider.dart';
 import '../../history/data/local_database.dart';
+import '../../history/presentation/history_screen.dart';
 import '../../history/providers/history_provider.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../tracking/data/models/trip_state.dart';
 import '../../tracking/presentation/active_trip_screen.dart';
 import '../../tracking/providers/tracking_provider.dart';
+import '../providers/map_provider.dart';
 import 'widgets/map_view.dart';
 
-class HomeScreen extends ConsumerStatefulWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends ConsumerState<HomeScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulseCtrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1800),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _pulseCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final destination = ref.watch(selectedDestinationProvider);
     final alertSettings = ref.watch(alertConfigProvider);
     final TripState trackingState = ref.watch(trackingProvider);
-    final Color accent = ref.watch(accentColorProvider);
+    final recentTrips = ref.watch(tripHistoryProvider);
+    final LatLng? currentLocation = ref.watch(currentLocationProvider).valueOrNull;
+
     final LatLng? destinationMarker = destination == null
         ? null
         : LatLng(destination.latitude, destination.longitude);
 
+    final routeState = ref.watch(routeSelectionProvider);
+    final bool isDark = context.isDarkMode;
+    final Color accent = context.appAccent;
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
-        backgroundColor: AppColors.background,
-        body: Stack(
-          children: <Widget>[
-            // ── FULL-SCREEN MAP ──────────────────────────────────────────────
-            Positioned.fill(
-              child: MapView(
-                initialZoom: 15.0,
-                followUser: true,
-                destinationMarker: destinationMarker,
-                alertRadius: destinationMarker == null ? null : alertSettings.alertRadiusMeters,
-                showRadius: destinationMarker != null,
-              ),
-            ),
+        backgroundColor: context.appBackground,
+        body: OrientationBuilder(
+          builder: (context, orientation) {
+            final isLandscape = orientation == Orientation.landscape;
 
-            // ── TOP SEARCH PILL ──────────────────────────────────────────────
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 12,
-              left: 16,
-              right: 72, // leave room for FABs on right
-              child: _SearchPill(accent: accent),
-            ),
+            return Stack(
+              children: <Widget>[
+                // ── 1. FULL-SCREEN VECTOR MAP ──────────────────────────────
+                Positioned.fill(
+                  child: MapView(
+                    initialZoom: 15.0,
+                    followUser: destination == null,
+                    destinationMarker: destinationMarker,
+                    alertRadius: destinationMarker == null
+                        ? null
+                        : alertSettings.alertRadiusMeters,
+                    showRadius: destinationMarker != null,
+                    routePoints: routeState.selectedRoute?.polyline,
+                  ),
+                ),
 
-            // ── RIGHT FAB STACK (Layers / Location / Settings) ────────────────
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              right: 16,
-              child: Column(
-                children: <Widget>[
-                  _MapFab(
-                    icon: Icons.layers_rounded,
-                    accent: accent,
-                    onTap: () => _showLayerPicker(context),
+                // ── 2. TOP FLOATING SEARCH CAPSULE ─────────────────────────
+                Positioned(
+                  top: MediaQuery.of(context).padding.top + 12,
+                  left: isLandscape ? 80 : 20,
+                  right: isLandscape ? 80 : 20,
+                  child: _TopSearchCapsule(
+                    accentColor: accent,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const SearchScreen(),
+                        ),
+                      );
+                    },
                   ),
-                  const SizedBox(height: 8),
-                  _MapFab(
-                    icon: Icons.my_location_rounded,
-                    accent: accent,
-                    onTap: () {}, // MapView re-centers on next location update
-                  ),
-                  const SizedBox(height: 8),
-                  _MapFab(
-                    icon: Icons.settings_rounded,
-                    accent: accent,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                ),
 
-            // ── BOTTOM SHEET (recent places / destination panel) ─────────────
-            destination == null
-                ? _RecentPlacesSheet(accent: accent)
-                : AnimatedPositioned(
-                    duration: const Duration(milliseconds: 350),
-                    curve: Curves.easeOutCubic,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: _DestinationPanel(
-                      destination: destination,
-                      trackingState: trackingState,
-                      accent: accent,
-                      alertRadiusMeters: alertSettings.alertRadiusMeters,
-                      onStartTrip: () async {
-                        if (trackingState.isActive) {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                                builder: (_) => const ActiveTripScreen()),
-                          );
-                          return;
-                        }
-                        final bool success = await ref
-                            .read(trackingProvider.notifier)
-                            .startTrip(destination, alertSettings);
-                        if (!context.mounted) return;
-                        if (success) {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                                builder: (_) => const ActiveTripScreen()),
-                          );
-                        } else {
+                // ── 3. RIGHT FLOATING BUTTON GROUP ─────────────────────────
+                Positioned(
+                  right: 20,
+                  top: MediaQuery.of(context).padding.top + 90,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _FloatingCircleButton(
+                        icon: Icons.layers_rounded,
+                        accentColor: accent,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          final current = ref.read(isDarkMapProvider);
+                          ref.read(isDarkMapProvider.notifier).state = !current;
+                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(
-                                ref.read(trackingProvider).errorMessage ??
-                                    'Unable to start tracking.',
-                              ),
-                              backgroundColor: AppColors.error,
+                              content: Text(!current ? 'Dark Map Style Active' : 'Light Map Style Active'),
+                              duration: const Duration(milliseconds: 900),
                             ),
                           );
-                        }
-                      },
-                      onClearDestination: () =>
-                          ref.read(selectedDestinationProvider.notifier).clearDestination(),
-                    ),
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _FloatingCircleButton(
+                        icon: Icons.my_location_rounded,
+                        accentColor: accent,
+                        onTap: () async {
+                          HapticFeedback.selectionClick();
+                          ref.read(recenterMapTriggerProvider.notifier).state++;
+
+                          final LatLng? loc = ref.read(currentLocationProvider).valueOrNull;
+                          if (loc == null) {
+                            try {
+                              await Geolocator.getCurrentPosition(
+                                locationSettings: const LocationSettings(
+                                  accuracy: LocationAccuracy.high,
+                                  timeLimit: Duration(seconds: 4),
+                                ),
+                              );
+                              ref.read(recenterMapTriggerProvider.notifier).state++;
+                            } catch (_) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Locating your position... Please check GPS permission.'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            }
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      _FloatingCircleButton(
+                        icon: Icons.settings_rounded,
+                        iconColor: accent,
+                        accentColor: accent,
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SettingsScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-          ],
+                ),
+
+                // ── 4. BOTTOM DRAGGABLE RECENT PLACES OR ROUTE PANEL ──────
+                if (destination != null)
+                  _buildDestinationRoutePanel(
+                    context,
+                    ref,
+                    destination,
+                    routeState,
+                    trackingState,
+                    isLandscape,
+                    accent,
+                  )
+                else
+                  _buildRecentPlacesSheet(
+                    context,
+                    ref,
+                    recentTrips,
+                    currentLocation,
+                    isLandscape,
+                    accent,
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  void _showLayerPicker(BuildContext context) {
-    final Color accent = ref.read(accentColorProvider);
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _LayerPickerSheet(accent: accent),
-    );
-  }
-}
+  // ─────────────────────────────────────────────────────────────────────────
+  // Bottom Sheet: Recent Places (Strictly Dynamic, Matching Designs/)
+  // ─────────────────────────────────────────────────────────────────────────
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Search Pill (top bar)
-// ──────────────────────────────────────────────────────────────────────────────
-
-class _SearchPill extends StatelessWidget {
-  final Color accent;
-  const _SearchPill({required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        useSafeArea: true,
-        builder: (_) => const DestinationSearchSheet(),
-      ),
-      child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(color: accent.withAlpha(120), width: 1.5),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withAlpha(60),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(Icons.search_rounded, color: accent, size: 22),
-            const SizedBox(width: 10),
-            Text(
-              'Where do you want to go?',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 15,
-                fontWeight: FontWeight.w400,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Map FAB button
-// ──────────────────────────────────────────────────────────────────────────────
-
-class _MapFab extends StatelessWidget {
-  final IconData icon;
-  final Color accent;
-  final VoidCallback onTap;
-  const _MapFab({required this.icon, required this.accent, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          shape: BoxShape.circle,
-          border: Border.all(color: AppColors.border, width: 1),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withAlpha(60),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Icon(icon, color: accent, size: 20),
-      ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Recent Places Bottom Sheet (home state — no destination selected)
-// ──────────────────────────────────────────────────────────────────────────────
-
-class _RecentPlacesSheet extends ConsumerWidget {
-  final Color accent;
-  const _RecentPlacesSheet({required this.accent});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final history = ref.watch(tripHistoryProvider);
-    final recentTrips = history.take(5).toList();
-
+  Widget _buildRecentPlacesSheet(
+    BuildContext context,
+    WidgetRef ref,
+    List<TripRecord> recentTrips,
+    LatLng? currentLocation,
+    bool isLandscape,
+    Color accent,
+  ) {
     return Positioned(
-      left: 0,
-      right: 0,
+      left: isLandscape ? MediaQuery.of(context).size.width * 0.15 : 0,
+      right: isLandscape ? MediaQuery.of(context).size.width * 0.15 : 0,
       bottom: 0,
       child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * (isLandscape ? 0.55 : 0.42),
+        ),
+        padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 16),
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border(top: BorderSide(color: AppColors.border, width: 1)),
+          color: context.appCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          border: Border.all(color: context.appBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: context.isDarkMode ? 0.5 : 0.1),
+              blurRadius: 30,
+              offset: const Offset(0, -6),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            // Handle
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.border,
-                borderRadius: BorderRadius.circular(2),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Drag handle
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: context.appBorder,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
 
-            // Recent places header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: <Widget>[
-                  Icon(Icons.history_rounded, color: accent, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Recent places',
-                    style: TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+            // Header: "Recent places" with clock icon
+            Row(
+              children: [
+                Icon(
+                  Icons.history_rounded,
+                  color: accent,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Recent places',
+                  style: TextStyle(
+                    color: context.appTextPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+
             const SizedBox(height: 12),
 
-            // List of recent destinations
-            if (recentTrips.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                child: Text(
-                  'Your trip history will appear here',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                ),
-              )
-            else
-              ...recentTrips.map((trip) => _RecentTripRow(trip: trip, accent: accent)),
-
-            // Swipe hint
-            Padding(
-              padding: EdgeInsets.only(
-                top: 8,
-                bottom: MediaQuery.of(context).padding.bottom + 16,
-              ),
-              child: Column(
-                children: <Widget>[
-                  Icon(Icons.keyboard_arrow_up_rounded,
-                      color: accent, size: 20),
-                  Text(
-                    'Swipe up to view all history',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
+            // Dynamic List or Polished Empty State for New User
+            Expanded(
+              child: recentTrips.isEmpty
+                  ? _buildNewUserEmptyState(context, accent)
+                  : ListView.separated(
+                      padding: EdgeInsets.zero,
+                      itemCount: recentTrips.take(4).length,
+                      separatorBuilder: (_, __) => Divider(
+                        color: context.appBorder.withValues(alpha: 0.5),
+                        height: 1,
+                      ),
+                      itemBuilder: (context, index) {
+                        final trip = recentTrips[index];
+                        return _buildRecentPlaceTile(
+                          context,
+                          ref,
+                          trip,
+                          currentLocation,
+                          accent,
+                        );
+                      },
                     ),
+            ),
+
+            // "Swipe up to view all history" footer
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.keyboard_arrow_up_rounded, color: accent, size: 20),
+                      Text(
+                        'Swipe up to view all history',
+                        style: TextStyle(
+                          color: context.appTextSecondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ],
@@ -347,162 +310,228 @@ class _RecentPlacesSheet extends ConsumerWidget {
       ),
     );
   }
-}
 
-class _RecentTripRow extends StatelessWidget {
-  final TripRecord trip;
-  final Color accent;
-  const _RecentTripRow({required this.trip, required this.accent});
-
-  IconData _iconForName(String name) {
-    final String l = name.toLowerCase();
-    if (l.contains('hospital') || l.contains('medical') || l.contains('health')) {
-      return Icons.local_hospital_rounded;
-    } else if (l.contains('college') || l.contains('school') || l.contains('university')) {
-      return Icons.school_rounded;
-    } else if (l.contains('mall') || l.contains('market') || l.contains('shop')) {
-      return Icons.shopping_bag_rounded;
-    } else if (l.contains('station') || l.contains('bus') || l.contains('train')) {
-      return Icons.directions_bus_rounded;
+  Widget _buildRecentPlaceTile(
+    BuildContext context,
+    WidgetRef ref,
+    TripRecord trip,
+    LatLng? currentLocation,
+    Color accent,
+  ) {
+    int? distKm;
+    int? etaMin;
+    if (currentLocation != null) {
+      final meters = const Distance().as(
+        LengthUnit.Meter,
+        currentLocation,
+        LatLng(trip.destinationLat, trip.destinationLng),
+      );
+      distKm = (meters / 1000).round();
+      etaMin = ((meters / 6.94) / 60 + 5).round();
     }
-    return Icons.location_on_rounded;
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final String name = trip.destinationName;
-    final String? address = trip.destinationDescription;
+    return InkWell(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        final dest = Destination(
+          id: trip.id,
+          name: trip.destinationName,
+          description: trip.destinationDescription,
+          latitude: trip.destinationLat,
+          longitude: trip.destinationLng,
+          selectedAt: DateTime.now(),
+          source: PlaceSource.ola,
+        );
+        ref.read(selectedDestinationProvider.notifier).select(dest);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: accent.withAlpha(25),
-              shape: BoxShape.circle,
-              border: Border.all(color: accent.withAlpha(60), width: 1),
-            ),
-            child: Icon(_iconForName(name), color: accent, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+        if (currentLocation != null) {
+          ref.read(routeSelectionProvider.notifier).fetchRoutes(
+                origin: currentLocation,
+                destination: LatLng(trip.destinationLat, trip.destinationLng),
+              );
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            // Category Icon in circle avatar with accent border
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: context.appCardElevated,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: accent.withValues(alpha: 0.5),
+                  width: 1.2,
                 ),
-                if (address != null)
+              ),
+              child: Icon(
+                _inferCategoryIcon(trip.destinationName),
+                color: accent,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+
+            // Destination Name & Address
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    address,
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                    trip.destinationName,
+                    style: TextStyle(
+                      color: context.appTextPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-              ],
+                  const SizedBox(height: 3),
+                  Text(
+                    trip.destinationDescription ?? 'Saved Destination',
+                    style: TextStyle(
+                      color: context.appTextSecondary,
+                      fontSize: 12,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+
+            // ETA and Distance
+            if (etaMin != null && distKm != null)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '$etaMin min',
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$distKm km',
+                    style: TextStyle(
+                      color: context.appTextSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _inferCategoryIcon(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('college') || lower.contains('school') || lower.contains('university')) {
+      return Icons.school_rounded;
+    }
+    if (lower.contains('mall') || lower.contains('market') || lower.contains('bazaar')) {
+      return Icons.shopping_bag_rounded;
+    }
+    if (lower.contains('hospital') || lower.contains('clinic') || lower.contains('health')) {
+      return Icons.medical_services_rounded;
+    }
+    if (lower.contains('temple') || lower.contains('church') || lower.contains('mosque')) {
+      return Icons.temple_hindu_rounded;
+    }
+    return Icons.place_rounded;
+  }
+
+  Widget _buildNewUserEmptyState(BuildContext context, Color accent) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.explore_outlined,
+            color: accent,
+            size: 32,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'No recent places yet',
+            style: TextStyle(
+              color: context.appTextPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          // Placeholder ETA (future: fetch from Distance Matrix API)
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: <Widget>[
-              Text(
-                '-- min',
-                style: TextStyle(
-                  color: accent,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
-                '-- km',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-              ),
-            ],
+          const SizedBox(height: 4),
+          Text(
+            'Search a destination above to start your commute alarm',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: context.appTextSecondary,
+              fontSize: 12,
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Destination selected panel (bottom)
-// ──────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Destination Route Selector Panel (When destination is chosen)
+  // ─────────────────────────────────────────────────────────────────────────
 
-class _DestinationPanel extends StatelessWidget {
-  final dynamic destination;
-  final TripState trackingState;
-  final Color accent;
-  final double alertRadiusMeters;
-  final VoidCallback onStartTrip;
-  final VoidCallback onClearDestination;
+  Widget _buildDestinationRoutePanel(
+    BuildContext context,
+    WidgetRef ref,
+    Destination destination,
+    RouteSelectionState routeState,
+    TripState trackingState,
+    bool isLandscape,
+    Color accent,
+  ) {
+    final alertSettings = ref.read(alertConfigProvider);
 
-  const _DestinationPanel({
-    required this.destination,
-    required this.trackingState,
-    required this.accent,
-    required this.alertRadiusMeters,
-    required this.onStartTrip,
-    required this.onClearDestination,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isActive = trackingState.isActive;
-    final int? distM = trackingState.currentDistanceMeters?.round();
-    final String distText = distM == null
-        ? '--'
-        : distM < 1000
-            ? '$distM m'
-            : '${(distM / 1000).toStringAsFixed(1)} km';
-    final int? etaMin = trackingState.estimatedTimeRemaining?.inMinutes;
-    final String etaText = etaMin == null ? '--' : '${etaMin.clamp(1, 999)} min';
-    final int alertM = alertRadiusMeters.round();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(top: BorderSide(color: AppColors.border, width: 1)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          // Handle
-          Container(
-            margin: const EdgeInsets.only(top: 10),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.border,
-              borderRadius: BorderRadius.circular(2),
+    return Positioned(
+      left: isLandscape ? MediaQuery.of(context).size.width * 0.15 : 0,
+      right: isLandscape ? MediaQuery.of(context).size.width * 0.15 : 0,
+      bottom: 0,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: context.appCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          border: Border.all(color: context.appBorder),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: context.isDarkMode ? 0.5 : 0.1),
+              blurRadius: 30,
+              offset: const Offset(0, -6),
             ),
-          ),
-          const SizedBox(height: 16),
-
-          // Destination name row
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: <Widget>[
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Destination Name & Clear
+            Row(
+              children: [
                 Icon(Icons.location_on_rounded, color: accent, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    destination.name as String? ?? 'Destination',
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
+                    destination.name,
+                    style: TextStyle(
+                      color: context.appTextPrimary,
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
                     ),
@@ -510,292 +539,240 @@ class _DestinationPanel extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (isActive)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: accent, width: 1.5),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'TRACKING',
-                      style: TextStyle(
-                        color: accent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Metrics row: ETA | Distance | Alert at
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: <Widget>[
-                _MetricCell(
-                  icon: Icons.timer_outlined,
-                  label: 'ETA',
-                  value: etaText,
-                  accent: accent,
-                  valueColor: accent,
-                ),
-                _Separator(),
-                _MetricCell(
-                  icon: Icons.alt_route_rounded,
-                  label: 'Distance',
-                  value: distText,
-                  accent: accent,
-                ),
-                _Separator(),
-                _MetricCell(
-                  icon: Icons.notifications_none_rounded,
-                  label: 'Alert at',
-                  value: alertM >= 1000
-                      ? '${(alertM / 1000).toStringAsFixed(1)} km'
-                      : '$alertM m',
-                  accent: accent,
+                IconButton(
+                  icon: Icon(Icons.close_rounded, color: context.appTextSecondary),
+                  onPressed: () {
+                    ref.read(selectedDestinationProvider.notifier).clear();
+                    ref.read(routeSelectionProvider.notifier).clear();
+                  },
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
 
-          // Buttons row
-          Padding(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              bottom: MediaQuery.of(context).padding.bottom + 20,
-            ),
-            child: Row(
-              children: <Widget>[
-                // Clear button
-                GestureDetector(
-                  onTap: onClearDestination,
-                  child: Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.border, width: 1),
-                    ),
-                    child: Icon(Icons.close_rounded,
-                        color: AppColors.textSecondary, size: 22),
-                  ),
+            const SizedBox(height: 12),
+
+            // Route Alternatives Selector (from Ola Directions API)
+            if (routeState.isLoading)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: CircularProgressIndicator(color: accent, strokeWidth: 2),
                 ),
-                const SizedBox(width: 12),
-
-                // Start/Open Trip button
-                Expanded(
-                  child: GestureDetector(
-                    onTap: onStartTrip,
-                    child: Container(
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: accent,
+              )
+            else if (routeState.routes.isNotEmpty)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: List.generate(routeState.routes.length, (idx) {
+                    final r = routeState.routes[idx];
+                    final isSelected = routeState.selectedIndex == idx;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: InkWell(
+                        onTap: () => ref.read(routeSelectionProvider.notifier).selectRoute(idx),
                         borderRadius: BorderRadius.circular(14),
-                        boxShadow: <BoxShadow>[
-                          BoxShadow(
-                            color: accent.withAlpha(80),
-                            blurRadius: 16,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: <Widget>[
-                          Icon(
-                            isActive
-                                ? Icons.navigation_rounded
-                                : Icons.play_arrow_rounded,
-                            color: Colors.black,
-                            size: 22,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            isActive ? 'Open Trip' : 'Start Trip',
-                            style: const TextStyle(
-                              color: Colors.black,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.3,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? accent.withValues(alpha: 0.15)
+                                : context.appCardElevated,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isSelected ? accent : context.appBorder,
+                              width: 1.5,
                             ),
                           ),
-                        ],
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.alt_route_rounded,
+                                color: isSelected ? accent : context.appTextSecondary,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Route ${idx + 1}',
+                                    style: TextStyle(
+                                      color: isSelected ? accent : context.appTextPrimary,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${r.readableDuration} • ${r.readableDistance}',
+                                    style: TextStyle(
+                                      color: context.appTextSecondary,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  }),
                 ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricCell extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color accent;
-  final Color? valueColor;
-
-  const _MetricCell({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.accent,
-    this.valueColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: <Widget>[
-          Icon(icon, color: AppColors.textSecondary, size: 18),
-          const SizedBox(height: 4),
-          Text(label, style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor ?? AppColors.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Separator extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 40,
-      color: AppColors.border,
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Layer picker sheet
-// ──────────────────────────────────────────────────────────────────────────────
-
-class _LayerPickerSheet extends StatelessWidget {
-  final Color accent;
-  const _LayerPickerSheet({required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: MediaQuery.of(context).padding.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            'Map Style',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: <Widget>[
-              _LayerOption(
-                label: 'Dark (Custom)',
-                icon: Icons.dark_mode_rounded,
-                accent: accent,
-                selected: true,
               ),
-              const SizedBox(width: 12),
-              _LayerOption(
-                label: 'Standard',
-                icon: Icons.map_rounded,
-                accent: accent,
-                selected: false,
-              ),
-              const SizedBox(width: 12),
-              _LayerOption(
-                label: 'Satellite',
-                icon: Icons.satellite_alt_rounded,
-                accent: accent,
-                selected: false,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
 
-class _LayerOption extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color accent;
-  final bool selected;
+            const SizedBox(height: 16),
 
-  const _LayerOption({
-    required this.label,
-    required this.icon,
-    required this.accent,
-    required this.selected,
-  });
+            // Start Trip CTA Button
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor:
+                      ThemeData.estimateBrightnessForColor(accent) == Brightness.light
+                          ? Colors.black
+                          : Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 0,
+                ),
+                icon: const Icon(Icons.navigation_rounded, size: 20),
+                label: const Text(
+                  'Start Trip & Tracking',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                onPressed: () async {
+                  HapticFeedback.heavyImpact();
+                  if (trackingState.isActive) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => const ActiveTripScreen()),
+                    );
+                    return;
+                  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: selected ? accent.withAlpha(30) : AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? accent : AppColors.border,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Column(
-          children: <Widget>[
-            Icon(icon, color: selected ? accent : AppColors.textSecondary, size: 24),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: selected ? accent : AppColors.textSecondary,
-                fontSize: 11,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  final bool success = await ref.read(trackingProvider.notifier).startTrip(
+                        destination,
+                        alertSettings,
+                        chosenRoute: routeState.selectedRoute,
+                      );
+
+                  if (context.mounted && success) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => const ActiveTripScreen()),
+                    );
+                  }
+                },
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Top Floating Search Capsule
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TopSearchCapsule extends StatelessWidget {
+  final VoidCallback onTap;
+  final Color accentColor;
+
+  const _TopSearchCapsule({
+    required this.onTap,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(28),
+      child: Container(
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          color: context.appCard.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: accentColor,
+            width: 1.4,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: context.isDarkMode ? 0.35 : 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search_rounded,
+              color: accentColor,
+              size: 24,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                'Where do you want to go?',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Floating Action Button
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _FloatingCircleButton extends StatelessWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _FloatingCircleButton({
+    required this.icon,
+    this.iconColor,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: context.appCard.withValues(alpha: 0.92),
+        shape: BoxShape.circle,
+        border: Border.all(color: context.appBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: context.isDarkMode ? 0.35 : 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: Icon(
+          icon,
+          color: iconColor ?? accentColor,
+          size: 22,
+        ),
+        onPressed: onTap,
       ),
     );
   }

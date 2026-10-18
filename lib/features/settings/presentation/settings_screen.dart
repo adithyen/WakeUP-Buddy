@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/constants/app_dimensions.dart';
 import '../../../core/services/map_api_key_provider.dart';
+import '../../../core/services/map_renderer_provider.dart';
+import '../../../core/services/ola_maps_service.dart';
 import '../../../core/theme/accent_color_provider.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../alert_config/presentation/alert_config_screen.dart';
 import '../../history/presentation/history_screen.dart';
 import '../../history/providers/history_provider.dart';
@@ -19,564 +22,656 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _apiKeyController;
+  late final TextEditingController _customStyleController;
   bool _obscureKey = true;
+  bool? _isConnected;
+  bool _isChecking = false;
+
+  int _selectedAccentIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _apiKeyController =
-        TextEditingController(text: ref.read(mapApiKeyProvider) ?? '');
+    _apiKeyController = TextEditingController(text: ref.read(mapApiKeyProvider) ?? '');
+    _customStyleController = TextEditingController(text: ref.read(customMapStyleProvider) ?? '');
+    _testConnection();
   }
 
   @override
   void dispose() {
     _apiKeyController.dispose();
+    _customStyleController.dispose();
     super.dispose();
+  }
+
+  Future<void> _testConnection() async {
+    setState(() => _isChecking = true);
+    final service = ref.read(olaMapsServiceProvider);
+    final ok = await service.verifyConnection(_apiKeyController.text.trim());
+    if (mounted) {
+      setState(() {
+        _isConnected = ok;
+        _isChecking = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final String? apiKey = ref.watch(mapApiKeyProvider);
-    final Color accent = ref.watch(accentColorProvider);
-    final int accentIndex = ref.watch(accentColorIndexProvider);
-    final bool hasValidKey = apiKey != null && apiKey.isNotEmpty;
+    final activeAccent = ref.watch(accentColorProvider);
+    _selectedAccentIndex = activeAccent.id;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.appBackground,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: context.appBackground,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_rounded, color: accent),
+          icon: Icon(Icons.arrow_back_rounded, color: context.appAccent),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text(
+        title: Text(
           'Settings',
           style: TextStyle(
-            color: AppColors.textPrimary,
+            color: context.appTextPrimary,
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(AppDimensions.xl),
-        children: <Widget>[
-          // ── Appearance ────────────────────────────────────────────────────
-          _SectionCard(
-            icon: Icons.palette_rounded,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        children: [
+          // ── 1. APPEARANCE CARD (Matching Designs/settings.png) ─────────────
+          _buildSettingsCard(
+            context,
+            icon: Icons.palette_outlined,
             title: 'Appearance',
-            accent: accent,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Theme',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+            children: [
+              Text(
+                'Theme',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
-                const SizedBox(height: 10),
-                const ThemeToggle(),
-                const SizedBox(height: 20),
-                Text(
-                  'Accent color',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+              ),
+              const SizedBox(height: 10),
+              const ThemeToggle(),
+              const SizedBox(height: 20),
+              Text(
+                'Accent color',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  "This will change the app's primary color and highlights.",
-                  style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                // Color circles
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(
-                    AppColors.accentPalette.length,
-                    (int i) {
-                      final Color c = AppColors.accentPalette[i];
-                      final bool selected = i == accentIndex;
-                      return GestureDetector(
-                        onTap: () =>
-                            ref.read(accentColorIndexProvider.notifier).setIndex(i),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          width: selected ? 38 : 32,
-                          height: selected ? 38 : 32,
-                          decoration: BoxDecoration(
-                            color: c,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: selected ? Colors.white : Colors.transparent,
-                              width: 2.5,
-                            ),
-                            boxShadow: selected
-                                ? <BoxShadow>[
-                                    BoxShadow(
-                                      color: c.withAlpha(120),
-                                      blurRadius: 12,
-                                      spreadRadius: 2,
-                                    )
-                                  ]
-                                : null,
-                          ),
-                          child: selected
-                              ? Icon(Icons.check_rounded,
-                                  color: Colors.black, size: 16)
-                              : null,
-                        ),
-                      );
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(availableAccents.length, (index) {
+                  final accentOpt = availableAccents[index];
+                  final isSelected = _selectedAccentIndex == index;
+                  return InkWell(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      ref.read(accentColorProvider.notifier).setAccentIndex(index);
                     },
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: AppDimensions.xl),
-
-          // ── Alert Configuration ───────────────────────────────────────────
-          _SectionCard(
-            icon: Icons.notifications_rounded,
-            title: 'Alert configuration',
-            accent: accent,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Adjust the alert radius, sound, vibration, and full-screen behavior before starting a trip.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                ),
-                const SizedBox(height: 16),
-                _LimeButton(
-                  label: 'Open alert settings',
-                  icon: Icons.tune_rounded,
-                  accent: accent,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                        builder: (_) => const AlertConfigScreen()),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: AppDimensions.xl),
-
-          // ── Ola Maps API Key ──────────────────────────────────────────────
-          _SectionCard(
-            icon: Icons.key_rounded,
-            title: 'Ola Maps API key',
-            accent: accent,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'If you add a valid key, the app will use Ola Maps tiles. Otherwise it falls back to OpenStreetMap.',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'API key',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceVariant,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border, width: 1),
-                  ),
-                  child: TextField(
-                    controller: _apiKeyController,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 14,
-                      fontFamily: 'monospace',
-                    ),
-                    obscureText: _obscureKey,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    decoration: InputDecoration(
-                      hintText: 'Paste your Ola Maps key here',
-                      hintStyle: const TextStyle(
-                          color: AppColors.textTertiary, fontSize: 14),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscureKey
-                              ? Icons.visibility_off_rounded
-                              : Icons.visibility_rounded,
-                          color: AppColors.textSecondary,
-                          size: 20,
-                        ),
-                        onPressed: () =>
-                            setState(() => _obscureKey = !_obscureKey),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      flex: 2,
-                      child: _LimeButton(
-                        label: 'Save key',
-                        icon: Icons.save_rounded,
-                        accent: accent,
-                        onTap: () async {
-                          await ref
-                              .read(mapApiKeyProvider.notifier)
-                              .setKey(_apiKeyController.text);
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text('Ola Maps key saved'),
-                                backgroundColor: accent.withAlpha(220),
-                              ),
-                            );
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _OutlineButton(
-                        label: 'Clear',
-                        accent: accent,
-                        onTap: () async {
-                          _apiKeyController.clear();
-                          await ref
-                              .read(mapApiKeyProvider.notifier)
-                              .setKey(null);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: <Widget>[
-                    Container(
-                      width: 8,
-                      height: 8,
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      width: 38,
+                      height: 38,
                       decoration: BoxDecoration(
-                        color: hasValidKey
-                            ? AppColors.success
-                            : AppColors.textTertiary,
+                        color: accentOpt.color,
                         shape: BoxShape.circle,
+                        border: isSelected
+                            ? Border.all(color: Colors.white, width: 3)
+                            : null,
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: accentOpt.color.withValues(alpha: 0.6),
+                                  blurRadius: 10,
+                                )
+                              ]
+                            : null,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      hasValidKey
-                          ? 'Status: Ola Maps connected'
-                          : 'Status: Using OpenStreetMap fallback',
-                      style: TextStyle(
-                        color: hasValidKey ? accent : AppColors.textSecondary,
-                        fontSize: 13,
-                        fontWeight: hasValidKey
-                            ? FontWeight.w600
-                            : FontWeight.w400,
+                  );
+                }),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                "This will change the app's primary color and highlights.",
+                style: TextStyle(
+                  color: context.appTextTertiary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── 2. ALERT CONFIGURATION CARD ──────────────────────────────────
+          _buildSettingsCard(
+            context,
+            icon: Icons.notifications_none_rounded,
+            title: 'Alert configuration',
+            children: [
+              Text(
+                'Adjust the alert radius, sound, vibration, and full-screen behavior before starting a trip.',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AlertConfigScreen(),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: context.appCardElevated,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: context.appBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.tune_rounded, color: context.appAccent, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Open alert settings',
+                          style: TextStyle(
+                            color: context.appTextPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
+                      Icon(Icons.chevron_right_rounded, color: context.appTextSecondary),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── 3. MAP RENDERING ENGINE (Ola Maps / Vela Maps / OSM) ─────────
+          _buildSettingsCard(
+            context,
+            icon: Icons.map_outlined,
+            title: 'Map rendering engine',
+            children: [
+              Text(
+                'Choose how maps and vector layers are rendered on your device.',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ...MapRendererType.values.map((renderer) {
+                final isSelected = ref.watch(mapRendererProvider) == renderer;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      ref.read(mapRendererProvider.notifier).setRenderer(renderer);
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? context.appAccent.withValues(alpha: 0.12)
+                            : context.appCardElevated,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected ? context.appAccent : context.appBorder,
+                          width: isSelected ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
+                            color: isSelected ? context.appAccent : context.appTextTertiary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  renderer.displayName,
+                                  style: TextStyle(
+                                    color: isSelected ? context.appAccent : context.appTextPrimary,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  renderer.description,
+                                  style: TextStyle(
+                                    color: context.appTextSecondary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── 4. OLA MAPS API KEY & CUSTOM STYLE ────────────────────────────
+          _buildSettingsCard(
+            context,
+            icon: Icons.vpn_key_outlined,
+            title: 'Ola Maps API key',
+            children: [
+              Text(
+                'If you add a valid key, the app will use Ola Maps vector tiles. Otherwise it falls back to OpenStreetMap.',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // API Key text input with obscured dots
+              Container(
+                height: 52,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: context.appCardElevated,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: context.appBorder),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _apiKeyController,
+                        obscureText: _obscureKey,
+                        style: TextStyle(
+                          color: context.appTextPrimary,
+                          fontSize: 14,
+                          letterSpacing: 2.0,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Enter Ola Maps API key',
+                          hintStyle: TextStyle(
+                            color: context.appTextTertiary,
+                            letterSpacing: 0,
+                          ),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _obscureKey ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        color: context.appTextSecondary,
+                        size: 20,
+                      ),
+                      onPressed: () => setState(() => _obscureKey = !_obscureKey),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Save & Clear buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: context.appAccent,
+                        foregroundColor: ThemeData.estimateBrightnessForColor(context.appAccent) == Brightness.light
+                            ? Colors.black
+                            : Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.save_rounded, size: 18),
+                      label: const Text('Save key', style: TextStyle(fontWeight: FontWeight.w700)),
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final key = _apiKeyController.text.trim();
+                        await ref.read(mapApiKeyProvider.notifier).setKey(key.isEmpty ? null : key);
+                        await _testConnection();
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Ola Maps API key updated!')),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: context.appTextPrimary,
+                        side: BorderSide(color: context.appBorder),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Clear', style: TextStyle(fontWeight: FontWeight.w600)),
+                      onPressed: () async {
+                        _apiKeyController.clear();
+                        await ref.read(mapApiKeyProvider.notifier).setKey(null);
+                        await _testConnection();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // Live Status Dot
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _isChecking
+                          ? Colors.orange
+                          : (_isConnected == true ? AppColors.success : AppColors.error),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isChecking
+                        ? 'Status: Verifying connection...'
+                        : (_isConnected == true
+                            ? 'Status: Ola Maps connected'
+                            : 'Status: Offline / Invalid API Key'),
+                    style: TextStyle(
+                      color: _isConnected == true ? context.appAccent : context.appTextSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 18),
+              Divider(color: context.appBorder),
+              const SizedBox(height: 10),
+
+              // Custom Style URL / ID input
+              Text(
+                'Custom Vector Style (e.g. Style1-Dark)',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 48,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: context.appCardElevated,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: context.appBorder),
+                      ),
+                      child: TextField(
+                        controller: _customStyleController,
+                        style: TextStyle(color: context.appTextPrimary, fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: 'Style1-Dark or published style URL',
+                          hintStyle: TextStyle(color: context.appTextTertiary, fontSize: 13),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.appCardElevated,
+                      foregroundColor: context.appAccent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: context.appBorder),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    ),
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final style = _customStyleController.text.trim();
+                      await ref
+                          .read(customMapStyleProvider.notifier)
+                          .setStyle(style.isEmpty ? null : style);
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Custom map style configured!')),
+                        );
+                      }
+                    },
+                    child: const Text('Set Style', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ],
           ),
 
-          const SizedBox(height: AppDimensions.xl),
+          const SizedBox(height: 16),
 
-          // ── Data ─────────────────────────────────────────────────────────
-          _SectionCard(
+          // ── 4. DATA MANAGEMENT CARD (Matching Designs/settings.png) ────────
+          _buildSettingsCard(
+            context,
             icon: Icons.storage_rounded,
             title: 'Data',
-            accent: accent,
-            child: Column(
-              children: <Widget>[
-                _DataRow(
-                  icon: Icons.history_rounded,
-                  label: 'Trip History',
-                  accent: accent,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                        builder: (_) => const HistoryScreen()),
-                  ),
-                ),
-                Divider(height: 1, color: AppColors.divider),
-                _DataRow(
-                  icon: Icons.delete_sweep_rounded,
-                  label: 'Clear Trip History',
-                  accent: accent,
-                  onTap: () async {
-                    final bool? ok = await _showConfirmDialog(
-                      context,
-                      'Clear trip history?',
-                      'All trip records will be deleted permanently.',
-                    );
-                    if (ok == true) {
-                      ref.read(tripHistoryProvider.notifier).clearAll();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('History cleared')),
-                        );
-                      }
+            children: [
+              _buildDataTile(
+                context,
+                icon: Icons.history_rounded,
+                title: 'Trip History',
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
+                  );
+                },
+              ),
+              Divider(color: context.appBorder, height: 1),
+              _buildDataTile(
+                context,
+                icon: Icons.delete_outline_rounded,
+                title: 'Clear Trip History',
+                isDestructive: true,
+                onTap: () async {
+                  final confirm = await _showConfirmDialog(
+                    context,
+                    title: 'Clear Trip History?',
+                    message: 'All past trip records will be permanently removed.',
+                  );
+                  if (confirm == true) {
+                    await ref.read(tripHistoryProvider.notifier).clearAll();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Trip history cleared.')),
+                      );
                     }
-                  },
-                ),
-                Divider(height: 1, color: AppColors.divider),
-                _DataRow(
-                  icon: Icons.bookmark_remove_rounded,
-                  label: 'Clear Saved Destinations',
-                  accent: accent,
-                  onTap: () async {
-                    final bool? ok = await _showConfirmDialog(
-                      context,
-                      'Clear saved destinations?',
-                      'All saved destinations will be removed.',
-                    );
-                    if (ok == true) {
-                      ref.read(savedDestinationsProvider.notifier).clearAll();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Saved destinations cleared')),
-                        );
-                      }
+                  }
+                },
+              ),
+              Divider(color: context.appBorder, height: 1),
+              _buildDataTile(
+                context,
+                icon: Icons.bookmark_border_rounded,
+                title: 'Clear Saved Destinations',
+                isDestructive: true,
+                onTap: () async {
+                  final confirm = await _showConfirmDialog(
+                    context,
+                    title: 'Clear Saved Destinations?',
+                    message: 'All bookmarked destinations will be removed.',
+                  );
+                  if (confirm == true) {
+                    await ref.read(savedDestinationsProvider.notifier).clearAll();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Saved destinations cleared.')),
+                      );
                     }
-                  },
-                ),
-              ],
-            ),
+                  }
+                },
+              ),
+            ],
           ),
-
-          const SizedBox(height: AppDimensions.xl),
-
-          // ── About ─────────────────────────────────────────────────────────
-          Center(
-            child: Text(
-              'WakeUp Buddy v2.0.0',
-              style: TextStyle(color: AppColors.textTertiary, fontSize: 13),
-            ),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  Future<bool?> _showConfirmDialog(
-    BuildContext context,
-    String title,
-    String content,
-  ) {
-    return showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text(title,
-            style: const TextStyle(color: AppColors.textPrimary)),
-        content: Text(content,
-            style: const TextStyle(color: AppColors.textSecondary)),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete',
-                style: TextStyle(color: AppColors.error)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared components
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SectionCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final Color accent;
-  final Widget child;
-
-  const _SectionCard({
-    required this.icon,
-    required this.title,
-    required this.accent,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildSettingsCard(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border, width: 1),
+        color: context.appCard,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: context.appBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: context.isDarkMode ? 0.3 : 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
+        children: [
           Row(
-            children: <Widget>[
-              Icon(icon, color: accent, size: 22),
+            children: [
+              Icon(icon, color: context.appAccent, size: 22),
               const SizedBox(width: 10),
               Text(
                 title,
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
+                style: TextStyle(
+                  color: context.appTextPrimary,
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          child,
+          const SizedBox(height: 14),
+          ...children,
         ],
       ),
     );
   }
-}
 
-class _LimeButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color accent;
-  final VoidCallback onTap;
-
-  const _LimeButton({
-    required this.label,
-    required this.icon,
-    required this.accent,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: accent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(icon, color: Colors.black, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.black,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _OutlineButton extends StatelessWidget {
-  final String label;
-  final Color accent;
-  final VoidCallback onTap;
-
-  const _OutlineButton({
-    required this.label,
-    required this.accent,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 48,
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: accent, width: 1.5),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: accent,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DataRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color accent;
-  final VoidCallback onTap;
-
-  const _DataRow({
-    required this.icon,
-    required this.label,
-    required this.accent,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildDataTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
         child: Row(
-          children: <Widget>[
-            Icon(icon, color: AppColors.textSecondary, size: 20),
-            const SizedBox(width: 14),
+          children: [
+            Icon(
+              icon,
+              color: isDestructive ? AppColors.coralAlert : context.appTextSecondary,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 15,
+                title,
+                style: TextStyle(
+                  color: isDestructive ? AppColors.coralAlert : context.appTextPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            Icon(Icons.chevron_right_rounded,
-                color: AppColors.textSecondary, size: 20),
+            Icon(Icons.chevron_right_rounded, color: context.appTextSecondary, size: 18),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<bool?> _showConfirmDialog(
+    BuildContext context, {
+    required String title,
+    required String message,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appCard,
+        title: Text(title, style: TextStyle(color: context.appTextPrimary)),
+        content: Text(message, style: TextStyle(color: context.appTextSecondary)),
+        actions: [
+          TextButton(
+            child: Text('Cancel', style: TextStyle(color: context.appTextSecondary)),
+            onPressed: () => Navigator.of(ctx).pop(false),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.coralAlert),
+            child: const Text('Clear', style: TextStyle(color: Colors.white)),
+            onPressed: () => Navigator.of(ctx).pop(true),
+          ),
+        ],
       ),
     );
   }

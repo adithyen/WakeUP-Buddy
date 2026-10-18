@@ -5,10 +5,12 @@
 *.swp
 .DS_Store
 .atom/
+.build/
 .buildlog/
 .history
 .svn/
-desktop.ini
+.swiftpm/
+migrate_working_dir/
 
 # IntelliJ related
 *.iml
@@ -16,34 +18,28 @@ desktop.ini
 *.iws
 .idea/
 
-# Visual Studio Code related
-.vscode/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
-.flutter-plugins
 .flutter-plugins-dependencies
-.packages
 .pub-cache/
 .pub/
 /build/
+/coverage/
 
-# Android related
-**/android/**/gradle-wrapper.jar
-**/android/.gradle
-**/android/captures/
-**/android/gradlew
-**/android/gradlew.bat
-**/android/local.properties
-**/android/**/GeneratedPluginRegistrant.java
+# Symbolication related
+app.*.symbols
 
-# Release Artifacts
-*.apk
-*.aab
-*.app
-*.ipa
+# Obfuscation related
+app.*.map.json
 
-# Chat & AI logs
-*.jsonl
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release

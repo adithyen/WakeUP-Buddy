@@ -24,10 +24,10 @@ class AlertConfigScreen extends ConsumerWidget {
         children: <Widget>[
 
           // ── SECTION: Alert Radius ────────────────────────────────────────
-          _SectionCard(
+          const _SectionCard(
             title: 'Alert Radius',
             icon: Icons.radar_rounded,
-            child: const RadiusSlider(),
+            child: RadiusSlider(),
           ),
           const SizedBox(height: 16),
 
@@ -60,10 +60,10 @@ class AlertConfigScreen extends ConsumerWidget {
           const SizedBox(height: 16),
 
           // ── SECTION: Sound ────────────────────────────────────────────────
-          _SectionCard(
+          const _SectionCard(
             title: 'Alarm Sound',
             icon: Icons.music_note_rounded,
-            child: const SoundPicker(),
+            child: SoundPicker(),
           ),
           const SizedBox(height: 16),
 

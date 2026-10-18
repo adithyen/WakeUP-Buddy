@@ -28,6 +28,10 @@ class TripState {
   final DateTime? tripStartTime;
   final String? errorMessage;
   final List<LatLng> breadcrumbs;
+  final List<LatLng> routePolyline;
+  final int? routeDurationSeconds;
+  final int? routeDistanceMeters;
+  final bool isOffRoute;
   final bool gpsSignalLost;
   final bool gpsJustRecovered;
   final String? gpsLostMessage;
@@ -46,6 +50,10 @@ class TripState {
     this.tripStartTime,
     this.errorMessage,
     this.breadcrumbs = const <LatLng>[],
+    this.routePolyline = const <LatLng>[],
+    this.routeDurationSeconds,
+    this.routeDistanceMeters,
+    this.isOffRoute = false,
     this.gpsSignalLost = false,
     this.gpsJustRecovered = false,
     this.gpsLostMessage,
@@ -57,13 +65,22 @@ class TripState {
       status == TripStatus.approaching ||
       status == TripStatus.alerting;
 
+  /// Traffic-aware ETA: Always returns valid duration even when speed is 0 in traffic
   Duration? get estimatedTimeRemaining {
-    if (currentDistanceMeters == null || currentSpeedMs == null || currentSpeedMs! <= 0) {
-      return null;
+    if (routeDurationSeconds != null && routeDurationSeconds! > 0) {
+      return Duration(seconds: routeDurationSeconds!);
     }
 
-    final double seconds = currentDistanceMeters! / currentSpeedMs!;
-    return Duration(seconds: seconds.round());
+    if (currentDistanceMeters != null) {
+      // If moving, use speed; if stationary, assume average urban transit speed (25 km/h = ~6.9 m/s)
+      final speed = (currentSpeedMs != null && currentSpeedMs! > 1.5)
+          ? currentSpeedMs!
+          : 6.94;
+      final double seconds = currentDistanceMeters! / speed;
+      return Duration(seconds: seconds.round());
+    }
+
+    return null;
   }
 
   double? get progress {
@@ -90,6 +107,10 @@ class TripState {
     String? errorMessage,
     bool clearError = false,
     List<LatLng>? breadcrumbs,
+    List<LatLng>? routePolyline,
+    int? routeDurationSeconds,
+    int? routeDistanceMeters,
+    bool? isOffRoute,
     bool? gpsSignalLost,
     bool? gpsJustRecovered,
     String? gpsLostMessage,
@@ -109,6 +130,10 @@ class TripState {
       tripStartTime: tripStartTime ?? this.tripStartTime,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       breadcrumbs: breadcrumbs ?? this.breadcrumbs,
+      routePolyline: routePolyline ?? this.routePolyline,
+      routeDurationSeconds: routeDurationSeconds ?? this.routeDurationSeconds,
+      routeDistanceMeters: routeDistanceMeters ?? this.routeDistanceMeters,
+      isOffRoute: isOffRoute ?? this.isOffRoute,
       gpsSignalLost: gpsSignalLost ?? this.gpsSignalLost,
       gpsJustRecovered: gpsJustRecovered ?? this.gpsJustRecovered,
       gpsLostMessage: clearGpsLostMessage ? null : (gpsLostMessage ?? this.gpsLostMessage),

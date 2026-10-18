@@ -1,14 +1,20 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../../../core/constants/app_colors.dart';
+import '../../../../core/constants/api_constants.dart';
+import '../../../../core/services/map_api_key_provider.dart';
+import '../../../../core/services/map_renderer_provider.dart';
 import '../../../../core/services/map_tile_provider.dart';
-import '../../../../core/theme/accent_color_provider.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../providers/map_provider.dart';
+import 'native_ola_map_view.dart';
 
 class MapView extends ConsumerStatefulWidget {
   final LatLng? initialCenter;
@@ -20,7 +26,6 @@ class MapView extends ConsumerStatefulWidget {
   final void Function(LatLng)? onLongPress;
   final bool followUser;
   final bool showRadius;
-  final bool isActiveTrip; // shows cyan dot instead of lime
 
   const MapView({
     super.key,
@@ -33,58 +38,225 @@ class MapView extends ConsumerStatefulWidget {
     this.onLongPress,
     this.followUser = true,
     this.showRadius = false,
-    this.isActiveTrip = false,
   });
 
   @override
   ConsumerState<MapView> createState() => _MapViewState();
 }
 
-class _MapViewState extends ConsumerState<MapView>
-    with TickerProviderStateMixin {
+class _MapViewState extends ConsumerState<MapView> {
   late final MapController _mapController = MapController();
+  OlaMapController? _nativeOlaController;
   LatLng? _lastKnownLocation;
-
-  // Pulsing animation for the location dot
-  late final AnimationController _pulseCtrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  )..repeat(reverse: true);
+  bool _nativeOlaHasError = false;
 
   @override
   void dispose() {
     _mapController.dispose();
-    _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  void _syncNativeOlaState(Color accent) {
+    if (_nativeOlaController == null) return;
+    final hex =
+        '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+
+    // Destination pin & alert radius
+    if (widget.destinationMarker != null) {
+      _nativeOlaController!.setDestination(
+        lat: widget.destinationMarker!.latitude,
+        lng: widget.destinationMarker!.longitude,
+        radiusMeters: widget.alertRadius ?? 500,
+        colorHex: hex,
+      );
+    }
+
+    // Route points polyline
+    if (widget.routePoints != null && widget.routePoints!.isNotEmpty) {
+      final points = widget.routePoints!
+          .map((p) => <double>[p.latitude, p.longitude])
+          .toList(growable: false);
+      _nativeOlaController!.drawRoute(
+        points: points,
+        colorHex: hex,
+        width: 6.0,
+      );
+      _nativeOlaController!.fitBounds(points: points, padding: 120);
+    }
+
+    // User location
+    final userPos = _lastKnownLocation;
+    if (userPos != null) {
+      _nativeOlaController!.updateUserLocation(
+        lat: userPos.latitude,
+        lng: userPos.longitude,
+        colorHex: hex,
+      );
+    }
+  }
+
+  @override
+  void didUpdateWidget(MapView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final accent = context.appAccent;
+    _syncNativeOlaState(accent);
+
+    if (widget.routePoints != null && widget.routePoints!.isNotEmpty) {
+      final bounds = LatLngBounds.fromPoints(widget.routePoints!);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _mapController.fitCamera(
+          CameraFit.bounds(
+            bounds: bounds,
+            padding: const EdgeInsets.only(
+              left: 60,
+              right: 60,
+              top: 100,
+              bottom: 260,
+            ),
+          ),
+        );
+      });
+    } else if (widget.destinationMarker != null &&
+        widget.destinationMarker != oldWidget.destinationMarker) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _mapController.move(widget.destinationMarker!, widget.initialZoom);
+        _nativeOlaController?.moveCamera(
+          lat: widget.destinationMarker!.latitude,
+          lng: widget.destinationMarker!.longitude,
+          zoom: widget.initialZoom,
+        );
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final MapRendererType renderer = ref.watch(mapRendererProvider);
     final MapTileConfig tileConfig = ref.watch(mapTileConfigProvider);
-    final AsyncValue<LatLng?> currentLocation =
-        ref.watch(currentLocationProvider);
-    final Color accent = ref.watch(accentColorProvider);
-    final Color dotColor =
-        widget.isActiveTrip ? AppColors.currentLocationActive : accent;
-
-    ref.listen<AsyncValue<LatLng?>>(
+    final AsyncValue<LatLng?> currentLocation = ref.watch(
       currentLocationProvider,
-      (AsyncValue<LatLng?>? previous, AsyncValue<LatLng?> next) {
-        final LatLng? point = next.valueOrNull;
-        if (point == null || point == _lastKnownLocation) return;
+    );
+    final String apiKey =
+        ref.watch(mapApiKeyProvider) ?? ApiConstants.defaultOlaApiKey;
+    final bool isDark = ref.watch(isDarkMapProvider);
+    final ThemeData theme = Theme.of(context);
+    final Color accent = context.appAccent;
+
+    // Listen to GPS position updates
+    ref.listen<AsyncValue<LatLng?>>(currentLocationProvider, (
+      AsyncValue<LatLng?>? previous,
+      AsyncValue<LatLng?> next,
+    ) {
+      final LatLng? point = next.valueOrNull;
+      if (point == null || point == _lastKnownLocation) return;
+      _lastKnownLocation = point;
+      if (widget.followUser && widget.destinationMarker == null) {
+        _mapController.move(point, _mapController.camera.zoom);
+        _nativeOlaController?.moveCamera(
+          lat: point.latitude,
+          lng: point.longitude,
+          zoom: 15.0,
+        );
+      }
+      final hex =
+          '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+      _nativeOlaController?.updateUserLocation(
+        lat: point.latitude,
+        lng: point.longitude,
+        colorHex: hex,
+      );
+    });
+
+    // Listen to recenter button click
+    ref.listen<int>(recenterMapTriggerProvider, (_, __) async {
+      LatLng? point = currentLocation.valueOrNull ?? _lastKnownLocation;
+      if (point == null) {
+        try {
+          final pos =
+              await Geolocator.getLastKnownPosition() ??
+              await Geolocator.getCurrentPosition(
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.high,
+                  timeLimit: Duration(seconds: 4),
+                ),
+              );
+          point = LatLng(pos.latitude, pos.longitude);
+        } catch (_) {}
+      }
+      if (point != null) {
         _lastKnownLocation = point;
-        if (widget.followUser) {
-          try {
-            _mapController.move(point, _mapController.camera.zoom);
-          } catch (_) {}
-        }
-      },
+        _mapController.move(point, 16.0);
+        _nativeOlaController?.moveCamera(
+          lat: point.latitude,
+          lng: point.longitude,
+          zoom: 16.0,
+        );
+      }
+    });
+
+    final LatLng fallbackCenter =
+        widget.destinationMarker ??
+        widget.initialCenter ??
+        currentLocation.valueOrNull ??
+        const LatLng(8.5241, 76.9366);
+
+    final String baseStyleUrl = isDark
+        ? ApiConstants.olaVectorStyleDark
+        : ApiConstants.olaVectorStyleLight;
+    final String styleUrl = ApiConstants.olaStyleUrlWithApiKey(
+      baseStyleUrl,
+      apiKey,
     );
 
-    final LatLng fallbackCenter = widget.initialCenter ??
-        currentLocation.valueOrNull ??
-        const LatLng(12.9716, 77.5946);
+    final Widget flutterMapFallback = _buildFlutterMap(
+      context,
+      tileConfig,
+      currentLocation,
+      fallbackCenter,
+      theme,
+      accent,
+    );
 
+    // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
+    if (renderer == MapRendererType.ola &&
+        !kIsWeb &&
+        Platform.isAndroid &&
+        !_nativeOlaHasError) {
+      return NativeOlaMapView(
+        initialLat: fallbackCenter.latitude,
+        initialLng: fallbackCenter.longitude,
+        initialZoom: widget.initialZoom,
+        apiKey: apiKey,
+        styleUrl: styleUrl,
+        fallback: flutterMapFallback,
+        onMapReady: (controller) {
+          _nativeOlaController = controller;
+          _syncNativeOlaState(accent);
+        },
+        onMapError: () {
+          if (mounted) {
+            setState(() {
+              _nativeOlaHasError = true;
+            });
+          }
+        },
+      );
+    }
+
+    // Otherwise render high-speed FlutterMap with selected tile engine (Vela / OSM)
+    return flutterMapFallback;
+  }
+
+  Widget _buildFlutterMap(
+    BuildContext context,
+    MapTileConfig tileConfig,
+    AsyncValue<LatLng?> currentLocation,
+    LatLng fallbackCenter,
+    ThemeData theme,
+    Color accent,
+  ) {
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
@@ -92,15 +264,15 @@ class _MapViewState extends ConsumerState<MapView>
         initialZoom: widget.initialZoom,
         minZoom: 4,
         maxZoom: 19,
-        onTap: (TapPosition tp, LatLng point) => widget.onTap?.call(point),
-        onLongPress: (TapPosition tp, LatLng point) =>
+        onTap: (TapPosition tapPosition, LatLng point) =>
+            widget.onTap?.call(point),
+        onLongPress: (TapPosition tapPosition, LatLng point) =>
             widget.onLongPress?.call(point),
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
         ),
       ),
       children: <Widget>[
-        // ── Tile layer (Style1-Dark) ─────────────────────────────────────────
         TileLayer(
           urlTemplate: tileConfig.urlTemplate,
           additionalOptions: tileConfig.additionalOptions,
@@ -110,26 +282,21 @@ class _MapViewState extends ConsumerState<MapView>
           maxNativeZoom: 18,
           keepBuffer: 2,
           panBuffer: 2,
-          tileUpdateTransformer: TileUpdateTransformers.debounce(
-            const Duration(milliseconds: 200),
-          ),
         ),
 
-        // ── Route polyline ───────────────────────────────────────────────────
+        // Route polyline with dynamic accent color
         if (widget.routePoints != null && widget.routePoints!.isNotEmpty)
           PolylineLayer(
             polylines: <Polyline>[
               Polyline(
                 points: widget.routePoints!,
-                strokeWidth: 5,
+                strokeWidth: 5.5,
                 color: accent,
-                borderStrokeWidth: 1.5,
-                borderColor: accent.withAlpha(60),
               ),
             ],
           ),
 
-        // ── Alert radius circle ──────────────────────────────────────────────
+        // Alert radius circle centred on destination
         if (widget.showRadius &&
             widget.alertRadius != null &&
             widget.destinationMarker != null)
@@ -139,46 +306,42 @@ class _MapViewState extends ConsumerState<MapView>
                 point: widget.destinationMarker!,
                 radius: widget.alertRadius!,
                 useRadiusInMeter: true,
-                color: AppColors.alertRadius,
-                borderColor: AppColors.alertRadiusBorder,
+                color: accent.withValues(alpha: 0.16),
+                borderColor: accent,
                 borderStrokeWidth: 2,
               ),
             ],
           ),
 
-        // ── Destination pin ──────────────────────────────────────────────────
+        // Destination pin in accent color
         if (widget.destinationMarker != null)
           MarkerLayer(
             markers: <Marker>[
               Marker(
                 point: widget.destinationMarker!,
                 width: 48,
-                height: 56,
-                child: const _DestinationPin(),
+                height: 48,
+                child: _DestinationPin(accentColor: accent),
               ),
             ],
           ),
 
-        // ── Current location dot with pulsing glow ───────────────────────────
+        // Current location dot
         if (currentLocation.valueOrNull != null)
           MarkerLayer(
             markers: <Marker>[
               Marker(
                 point: currentLocation.valueOrNull!,
-                width: 40,
-                height: 40,
-                child: _LocationDot(
-                  pulseCtrl: _pulseCtrl,
-                  dotColor: dotColor,
-                ),
+                width: 32,
+                height: 32,
+                child: _CurrentLocationDot(accentColor: accent),
               ),
             ],
           ),
 
-        // ── Attribution ──────────────────────────────────────────────────────
-        const RichAttributionWidget(
+        RichAttributionWidget(
           attributions: <SourceAttribution>[
-            TextSourceAttribution('© Ola Maps'),
+            TextSourceAttribution(tileConfig.attribution),
           ],
           alignment: AttributionAlignment.bottomLeft,
         ),
@@ -187,10 +350,10 @@ class _MapViewState extends ConsumerState<MapView>
   }
 }
 
-// ── Destination pin widget ─────────────────────────────────────────────────────
-
 class _DestinationPin extends StatelessWidget {
-  const _DestinationPin();
+  final Color accentColor;
+
+  const _DestinationPin({required this.accentColor});
 
   @override
   Widget build(BuildContext context) {
@@ -198,25 +361,28 @@ class _DestinationPin extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Container(
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
-            color: AppColors.destinationPin,
+            color: accentColor,
             shape: BoxShape.circle,
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: AppColors.destinationPin.withAlpha(120),
-                blurRadius: 16,
+                color: accentColor.withAlpha(120),
+                blurRadius: 12,
                 spreadRadius: 4,
               ),
             ],
           ),
-          child: const Icon(Icons.location_on_rounded,
-              color: Colors.white, size: 20),
+          child: const Icon(
+            Icons.location_on_rounded,
+            color: Colors.black,
+            size: 20,
+          ),
         ),
         CustomPaint(
           size: const Size(12, 8),
-          painter: _PinTailPainter(color: AppColors.destinationPin),
+          painter: _PinTailPainter(color: accentColor),
         ),
       ],
     );
@@ -239,55 +405,72 @@ class _PinTailPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_PinTailPainter old) => old.color != color;
+  bool shouldRepaint(_PinTailPainter oldDelegate) => oldDelegate.color != color;
 }
 
-// ── Location dot with glow pulse ──────────────────────────────────────────────
+class _CurrentLocationDot extends StatefulWidget {
+  final Color accentColor;
+  const _CurrentLocationDot({required this.accentColor});
 
-class _LocationDot extends StatelessWidget {
-  final AnimationController pulseCtrl;
-  final Color dotColor;
+  @override
+  State<_CurrentLocationDot> createState() => _CurrentLocationDotState();
+}
 
-  const _LocationDot({required this.pulseCtrl, required this.dotColor});
+class _CurrentLocationDotState extends State<_CurrentLocationDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: pulseCtrl,
-      builder: (BuildContext context, _) {
-        final double pulse = 0.5 + 0.5 * pulseCtrl.value;
-        return Center(
-          child: Stack(
-            alignment: Alignment.center,
-            children: <Widget>[
-              // Outer glow ring
-              Container(
-                width: 36 * pulse,
-                height: 36 * pulse,
+      animation: _controller,
+      builder: (context, _) {
+        final scale = 1.0 + (_controller.value * 0.35);
+        final opacity = 0.4 - (_controller.value * 0.25);
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Transform.scale(
+              scale: scale,
+              child: Container(
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: dotColor.withAlpha((80 * (1 - pulse + 0.3)).clamp(0, 255).round()),
                   shape: BoxShape.circle,
+                  color: widget.accentColor.withValues(alpha: opacity),
+                  border: Border.all(
+                    color: widget.accentColor.withValues(alpha: opacity * 1.5),
+                    width: 1.2,
+                  ),
                 ),
               ),
-              // Inner dot
-              Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: dotColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2.5),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: dotColor.withAlpha(160),
-                      blurRadius: 8,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
+            ),
+            Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: widget.accentColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.accentColor.withValues(alpha: 0.8),
+                    blurRadius: 10,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         );
       },
     );

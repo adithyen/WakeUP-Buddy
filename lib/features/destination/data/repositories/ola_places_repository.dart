@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../../../core/constants/api_constants.dart';
 import '../models/place_suggestion.dart';
@@ -33,15 +34,31 @@ class OlaPlacesRepository implements PlacesRepository {
         final List<dynamic> predictions = (response.data['predictions'] as List<dynamic>?) ?? <dynamic>[];
         return predictions.map((dynamic raw) {
           final Map<String, dynamic> p = raw as Map<String, dynamic>;
+          final double lat = _toDouble(p['geometry']?['location']?['lat']);
+          final double lng = _toDouble(p['geometry']?['location']?['lng']);
+
+          int? distanceMeters = (p['distance_meters'] as num?)?.round();
+          if (distanceMeters == null && nearLat != null && nearLng != null && lat != 0.0 && lng != 0.0) {
+            distanceMeters = Geolocator.distanceBetween(nearLat, nearLng, lat, lng).round();
+          }
+
+          int? durationSeconds;
+          if (distanceMeters != null && distanceMeters > 0) {
+            // Estimate average commute transit duration at ~25 km/h
+            durationSeconds = ((distanceMeters / 1000) / 25 * 3600).round();
+          }
+
           return PlaceSuggestion(
             placeId: p['place_id']?.toString() ?? '',
             name: p['structured_formatting']?['main_text']?.toString() ?? p['description']?.toString() ?? '',
             description: p['structured_formatting']?['secondary_text']?.toString() ?? '',
-            latitude: _toDouble(p['geometry']?['location']?['lat']),
-            longitude: _toDouble(p['geometry']?['location']?['lng']),
+            latitude: lat,
+            longitude: lng,
             formattedAddress: p['description']?.toString(),
             type: _inferPlaceType(p['types'] as List<dynamic>?),
             source: PlaceSource.ola,
+            distanceMeters: distanceMeters,
+            durationSeconds: durationSeconds,
           );
         }).toList(growable: false);
       }
@@ -93,14 +110,40 @@ class OlaPlacesRepository implements PlacesRepository {
       return PlaceType.other;
     }
 
-    final Set<String> typeSet = types.map((dynamic value) => value.toString()).toSet();
-    if (typeSet.contains('bus_station') || typeSet.contains('transit_station')) {
+    final Set<String> typeSet = types.map((dynamic value) => value.toString().toLowerCase()).toSet();
+    if (typeSet.contains('hindu_temple') ||
+        typeSet.contains('place_of_worship') ||
+        typeSet.contains('church') ||
+        typeSet.contains('mosque') ||
+        typeSet.contains('synagogue')) {
+      return PlaceType.temple;
+    }
+    if (typeSet.contains('hospital') ||
+        typeSet.contains('doctor') ||
+        typeSet.contains('health') ||
+        typeSet.contains('pharmacy')) {
+      return PlaceType.hospital;
+    }
+    if (typeSet.contains('university') ||
+        typeSet.contains('college') ||
+        typeSet.contains('school') ||
+        typeSet.contains('secondary_school')) {
+      return PlaceType.college;
+    }
+    if (typeSet.contains('shopping_mall') ||
+        typeSet.contains('store') ||
+        typeSet.contains('restaurant') ||
+        typeSet.contains('food') ||
+        typeSet.contains('cafe')) {
+      return PlaceType.shopping;
+    }
+    if (typeSet.contains('bus_station') || typeSet.contains('bus_stop')) {
       return PlaceType.busStop;
     }
     if (typeSet.contains('train_station')) {
       return PlaceType.trainStation;
     }
-    if (typeSet.contains('subway_station')) {
+    if (typeSet.contains('subway_station') || typeSet.contains('transit_station')) {
       return PlaceType.metroStation;
     }
     if (typeSet.contains('airport')) {

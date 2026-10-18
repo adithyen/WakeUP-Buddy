@@ -1,22 +1,19 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/theme/accent_color_provider.dart';
-import '../../alarm/providers/alarm_provider.dart';
-import '../../home/providers/map_provider.dart';
+import '../../../core/services/sensor_speed_service.dart';
+import '../../../core/theme/app_theme.dart';
 import '../data/models/trip_state.dart';
 import '../providers/tracking_provider.dart';
-import 'trip_completed_screen.dart';
 import 'widgets/gps_status_banner.dart';
+import 'widgets/hud_speedometer.dart';
 import 'widgets/trip_cancel_dialog.dart';
 import 'widgets/trip_map_view.dart';
 
-/// v2 Active Trip Screen — dark map, speed gauge, lime accent, matching Active_trip.png design.
 class ActiveTripScreen extends ConsumerStatefulWidget {
   const ActiveTripScreen({super.key});
 
@@ -28,37 +25,30 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     with TickerProviderStateMixin {
   bool _navigated = false;
 
-  // Glow animation for approaching state
-  late final AnimationController _glowCtrl = AnimationController(
+  late final AnimationController _glowController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1200),
   );
-  late final Animation<double> _glowAnim =
-      CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut);
+  late final Animation<double> _glowAnim = Tween<double>(begin: 0.0, end: 1.0)
+      .animate(CurvedAnimation(parent: _glowController, curve: Curves.easeInOut));
 
   Timer? _elapsedTimer;
-  DateTime _now = DateTime.now();
 
   @override
   void initState() {
     super.initState();
+
     _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _now = DateTime.now());
+      if (mounted) setState(() {});
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.listenManual<AlarmState>(
-        alarmOrchestratorProvider,
-        (AlarmState? previous, AlarmState next) {
-          if (next.phase == AlarmPhase.dismissed && !_navigated && mounted) {
+      ref.listenManual<TripState>(
+        trackingProvider,
+        (TripState? previous, TripState next) {
+          if (next.status == TripStatus.idle && !_navigated && mounted) {
             _navigated = true;
-            Navigator.of(context).pushReplacement(
-              PageRouteBuilder<void>(
-                pageBuilder: (_, Animation<double> a, __) =>
-                    FadeTransition(opacity: a, child: const TripCompletedScreen()),
-                transitionDuration: const Duration(milliseconds: 400),
-              ),
-            );
+            Navigator.of(context).popUntil((route) => route.isFirst);
           }
         },
       );
@@ -67,7 +57,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
 
   @override
   void dispose() {
-    _glowCtrl.dispose();
+    _glowController.dispose();
     _elapsedTimer?.cancel();
     super.dispose();
   }
@@ -76,7 +66,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     final bool confirmed = await showCancelTripDialog(context);
     if (confirmed && mounted) {
       await ref.read(trackingProvider.notifier).stopTrip();
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
     }
     return false;
   }
@@ -84,48 +74,39 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
   @override
   Widget build(BuildContext context) {
     final TripState trip = ref.watch(trackingProvider);
-    final Color accent = ref.watch(accentColorProvider);
-    final double speedKmh = ref.watch(currentSpeedKmhProvider).valueOrNull ?? 0;
+    final double liveSpeedKmh = ref.watch(speedTelemetryProvider).speedKmh;
+    final bool isDark = context.isDarkMode;
+    final Color accent = context.appAccent;
 
     final bool isApproaching = trip.status == TripStatus.approaching ||
         trip.status == TripStatus.alerting;
 
-    if (isApproaching && !_glowCtrl.isAnimating) {
-      _glowCtrl.repeat(reverse: true);
-    } else if (!isApproaching && _glowCtrl.isAnimating) {
-      _glowCtrl.stop();
-      _glowCtrl.reset();
+    if (isApproaching && !_glowController.isAnimating) {
+      _glowController.repeat(reverse: true);
+    } else if (!isApproaching && _glowController.isAnimating) {
+      _glowController.stop();
+      _glowController.reset();
     }
 
-    final String statusLabel = switch (trip.status) {
-      TripStatus.starting    => 'STARTING',
-      TripStatus.tracking    => 'TRACKING',
-      TripStatus.approaching => 'APPROACHING',
-      TripStatus.alerting    => 'ARRIVING!',
-      TripStatus.stopped     => 'STOPPED',
-      TripStatus.error       => 'ERROR',
-      _                      => 'ACTIVE',
-    };
-
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (bool didPop, _) {
           if (!didPop) _onWillPop();
         },
         child: Scaffold(
-          backgroundColor: AppColors.background,
+          backgroundColor: context.appBackground,
           body: Stack(
             children: <Widget>[
-              // ── FULL-SCREEN MAP ──────────────────────────────────────────
+              // 1. FULL-SCREEN MAP
               const Positioned.fill(child: TripMapView()),
 
-              // ── APPROACHING GLOW OVERLAY ─────────────────────────────────
+              // 2. RADIAL GLOW FOR APPROACHING / ARRIVING
               if (isApproaching)
                 AnimatedBuilder(
                   animation: _glowAnim,
-                  builder: (_, __) => Positioned.fill(
+                  builder: (BuildContext context, Widget? _) => Positioned.fill(
                     child: IgnorePointer(
                       child: Container(
                         decoration: BoxDecoration(
@@ -133,8 +114,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
                             center: Alignment.bottomCenter,
                             radius: 1.4,
                             colors: <Color>[
-                              AppColors.warning
-                                  .withAlpha((_glowAnim.value * 60).round()),
+                              accent.withValues(
+                                alpha: _glowAnim.value * 0.25,
+                              ),
                               Colors.transparent,
                             ],
                           ),
@@ -144,7 +126,7 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
                   ),
                 ),
 
-              // ── GPS STATUS BANNERS ───────────────────────────────────────
+              // 3. GPS STATUS / DIVERSION BANNER
               Positioned(
                 top: 0,
                 left: 0,
@@ -162,55 +144,88 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
                       message: 'GPS signal restored ✅',
                       isError: false,
                     ),
+                    if (trip.isOffRoute)
+                      Container(
+                        margin: EdgeInsets.only(
+                          top: MediaQuery.of(context).padding.top + 60,
+                          left: 20,
+                          right: 20,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.orangeWarning.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.alt_route_rounded, color: Colors.white, size: 18),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Route diversion detected. Updating route...',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
 
-              // ── TOP BAR: back + destination + status badge ────────────────
+              // 4. TOP TRACKING FLOATING CAPSULE
               Positioned(
-                top: MediaQuery.of(context).padding.top + 10,
-                left: 12,
-                right: 12,
-                child: _TopBar(
-                  destinationName: trip.destination?.name ?? 'Active Trip',
-                  statusLabel: statusLabel,
-                  isApproaching: isApproaching,
-                  accent: accent,
+                top: MediaQuery.of(context).padding.top + 12,
+                left: 20,
+                right: 20,
+                child: _TopTrackingBar(
+                  destinationName: trip.destination?.name ?? 'Active Destination',
+                  accentColor: accent,
                   onBack: _onWillPop,
                 ),
               ),
 
-              // ── RIGHT FABs (layers + recenter) ──────────────────────────
+              // 5. HUD SPEEDOMETER
               Positioned(
-                right: 14,
-                bottom: 240,
+                left: 20,
+                bottom: 215,
+                child: HudSpeedometer(speedKmh: liveSpeedKmh),
+              ),
+
+              // 6. MAP ACTION BUTTONS
+              Positioned(
+                right: 20,
+                bottom: 215,
                 child: Column(
-                  children: <Widget>[
-                    _TripFab(icon: Icons.layers_rounded, accent: accent),
-                    const SizedBox(height: 10),
-                    _TripFab(icon: Icons.my_location_rounded, accent: accent),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _RoundMapFab(
+                      icon: Icons.layers_rounded,
+                      accentColor: accent,
+                      onTap: () {},
+                    ),
+                    const SizedBox(height: 12),
+                    _RoundMapFab(
+                      icon: Icons.my_location_rounded,
+                      accentColor: accent,
+                      onTap: () {},
+                    ),
                   ],
                 ),
               ),
 
-              // ── SPEED GAUGE (bottom-left) ────────────────────────────────
-              Positioned(
-                left: 14,
-                bottom: 230,
-                child: _SpeedGauge(speedKmh: speedKmh, accent: accent),
-              ),
-
-              // ── BOTTOM PANEL ─────────────────────────────────────────────
+              // 7. BOTTOM METRIC CARD
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
-                child: _BottomPanel(
+                child: _ActiveTripBottomCard(
                   trip: trip,
-                  now: _now,
-                  accent: accent,
-                  isApproaching: isApproaching,
-                  speedKmh: speedKmh,
+                  accentColor: accent,
                   onCancel: _onWillPop,
                 ),
               ),
@@ -223,86 +238,94 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Top bar
+// Top Bar matching Designs/Active_trip.png
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _TopBar extends StatelessWidget {
+class _TopTrackingBar extends StatelessWidget {
   final String destinationName;
-  final String statusLabel;
-  final bool isApproaching;
-  final Color accent;
+  final Color accentColor;
   final Future<bool> Function() onBack;
 
-  const _TopBar({
+  const _TopTrackingBar({
     required this.destinationName,
-    required this.statusLabel,
-    required this.isApproaching,
-    required this.accent,
+    required this.accentColor,
     required this.onBack,
   });
 
   @override
   Widget build(BuildContext context) {
-    final Color badgeColor = isApproaching ? AppColors.warning : accent;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1),
-        boxShadow: <BoxShadow>[
+        color: context.appCard.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: context.appBorder),
+        boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(80),
-            blurRadius: 20,
+            color: Colors.black.withValues(alpha: context.isDarkMode ? 0.35 : 0.08),
+            blurRadius: 16,
             offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
-        children: <Widget>[
-          GestureDetector(
+        children: [
+          // Back button
+          InkWell(
             onTap: onBack,
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceVariant,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.border, width: 1),
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: context.appTextPrimary,
+                size: 18,
               ),
-              child: Icon(Icons.arrow_back_ios_new_rounded,
-                  size: 15, color: AppColors.textSecondary),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Icon(Icons.location_on_rounded,
-              color: AppColors.destinationPin, size: 18),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              destinationName,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-              overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: 8),
+
+          // Location pin in accent color
+          Icon(
+            Icons.location_on_rounded,
+            color: accentColor,
+            size: 20,
+          ),
+          const SizedBox(width: 6),
+
+          // Destination title
+          Expanded(
+            child: Text(
+              destinationName,
+              style: TextStyle(
+                color: context.appTextPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // TRACKING badge
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
-              border: Border.all(color: badgeColor, width: 1.5),
-              borderRadius: BorderRadius.circular(20),
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: accentColor,
+                width: 1.2,
+              ),
             ),
             child: Text(
-              statusLabel,
+              'TRACKING',
               style: TextStyle(
-                color: badgeColor,
+                color: accentColor,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1,
+                letterSpacing: 0.8,
               ),
             ),
           ),
@@ -313,339 +336,292 @@ class _TopBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Speed gauge (circular arc, bottom-left)
+// Floating Map Circular Action Button
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SpeedGauge extends StatelessWidget {
-  final double speedKmh;
-  final Color accent;
-  const _SpeedGauge({required this.speedKmh, required this.accent});
+class _RoundMapFab extends StatelessWidget {
+  final IconData icon;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _RoundMapFab({
+    required this.icon,
+    required this.accentColor,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final double displaySpeed = speedKmh.clamp(0, 200);
-    final double fraction = displaySpeed / 120; // 120 km/h = full arc
     return Container(
-      width: 90,
-      height: 90,
+      width: 48,
+      height: 48,
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: context.appCard.withValues(alpha: 0.9),
         shape: BoxShape.circle,
-        border: Border.all(color: AppColors.border, width: 1),
-        boxShadow: <BoxShadow>[
+        border: Border.all(color: context.appBorder),
+        boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(80),
-            blurRadius: 16,
+            color: Colors.black.withValues(alpha: context.isDarkMode ? 0.35 : 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: CustomPaint(
-        painter: _ArcPainter(
-          fraction: fraction.clamp(0, 1),
-          color: accent,
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                '${displaySpeed.round()}',
-                style: TextStyle(
-                  color: accent,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                ),
+      child: IconButton(
+        icon: Icon(icon, color: accentColor, size: 22),
+        onPressed: onTap,
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bottom Sliding Card matching Designs/Active_trip.png
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ActiveTripBottomCard extends StatelessWidget {
+  final TripState trip;
+  final Color accentColor;
+  final Future<bool> Function() onCancel;
+
+  const _ActiveTripBottomCard({
+    required this.trip,
+    required this.accentColor,
+    required this.onCancel,
+  });
+
+  String _formatETA() {
+    final dur = trip.estimatedTimeRemaining;
+    if (dur != null) {
+      if (dur.inMinutes >= 60) {
+        return '${dur.inHours}h ${dur.inMinutes % 60}m';
+      }
+      return '${dur.inMinutes} min';
+    }
+    return '-- min';
+  }
+
+  String _formatDistance() {
+    final meters = trip.currentDistanceMeters;
+    if (meters != null) {
+      if (meters < 1000) {
+        return '${meters.toInt()} m';
+      }
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
+    return '-- km';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final alertRadius = trip.alertSettings?.alertRadiusMeters.toInt() ?? 500;
+
+    return Container(
+      padding: EdgeInsets.only(
+        left: 22,
+        right: 22,
+        top: 12,
+        bottom: MediaQuery.of(context).padding.bottom + 18,
+      ),
+      decoration: BoxDecoration(
+        color: context.appCard,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border.all(color: context.appBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: context.isDarkMode ? 0.5 : 0.1),
+            blurRadius: 30,
+            offset: const Offset(0, -6),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: context.appBorder,
+                borderRadius: BorderRadius.circular(2),
               ),
-              Text(
-                'km/h',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Destination name with accent pin
+          Row(
+            children: [
+              Icon(
+                Icons.location_on_rounded,
+                color: accentColor,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  trip.destination?.name ?? 'Active Destination',
+                  style: TextStyle(
+                    color: context.appTextPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
 
-class _ArcPainter extends CustomPainter {
-  final double fraction;
-  final Color color;
-  const _ArcPainter({required this.fraction, required this.color});
+          const SizedBox(height: 18),
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Offset center = Offset(size.width / 2, size.height / 2);
-    final double radius = size.width / 2 - 5;
-    const double startAngle = math.pi * 0.75;
-    const double sweepTotal = math.pi * 1.5;
-
-    // Track (dim)
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      startAngle,
-      sweepTotal,
-      false,
-      Paint()
-        ..color = AppColors.border
-        ..strokeWidth = 4
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // Fill (accent)
-    if (fraction > 0) {
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweepTotal * fraction,
-        false,
-        Paint()
-          ..color = color
-          ..strokeWidth = 4
-          ..style = PaintingStyle.stroke
-          ..strokeCap = StrokeCap.round,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_ArcPainter old) =>
-      old.fraction != fraction || old.color != color;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Trip FAB button
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _TripFab extends StatelessWidget {
-  final IconData icon;
-  final Color accent;
-  const _TripFab({required this.icon, required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.border, width: 1),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withAlpha(80),
-            blurRadius: 12,
-          ),
-        ],
-      ),
-      child: Icon(icon, color: accent, size: 20),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Bottom panel (destination info + metrics + cancel)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _BottomPanel extends StatelessWidget {
-  final TripState trip;
-  final DateTime now;
-  final Color accent;
-  final bool isApproaching;
-  final double speedKmh;
-  final Future<bool> Function() onCancel;
-
-  const _BottomPanel({
-    required this.trip,
-    required this.now,
-    required this.accent,
-    required this.isApproaching,
-    required this.speedKmh,
-    required this.onCancel,
-  });
-
-  String _formatEta(double? distM) {
-    if (distM == null) return '--';
-    // Use current speed if > 2 km/h, else fallback to 30 km/h road assumption
-    final double effectiveKmh = speedKmh > 2 ? speedKmh : 30;
-    final int minutes = (distM / (effectiveKmh / 3.6 * 60)).round();
-    if (minutes >= 60) {
-      return '${minutes ~/ 60}h ${minutes % 60}min';
-    }
-    return '$minutes min';
-  }
-
-  String _formatDist(double? m) {
-    if (m == null) return '--';
-    return m < 1000 ? '${m.round()} m' : '${(m / 1000).toStringAsFixed(1)} km';
-  }
-
-  String _formatElapsed() {
-    if (trip.tripStartTime == null) return '--';
-    final Duration d = now.difference(trip.tripStartTime!);
-    if (d.inHours > 0) return '${d.inHours}h ${d.inMinutes % 60}m';
-    return '${d.inMinutes} min';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final Color badgeColor = isApproaching ? AppColors.warning : accent;
-    final String eta  = _formatEta(trip.currentDistanceMeters);
-    final String dist = _formatDist(trip.currentDistanceMeters);
-    final String alertAt = trip.alertSettings != null
-        ? _formatDist(trip.alertSettings!.alertRadiusMeters)
-        : '--';
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border(
-          top: BorderSide(
-            color: isApproaching ? AppColors.warning : AppColors.border,
-            width: isApproaching ? 1.5 : 1,
-          ),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          // Handle
-          Container(
-            margin: const EdgeInsets.only(top: 10),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Destination row
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.location_on_rounded,
-                    color: AppColors.destinationPin, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    trip.destination?.name ?? 'Destination',
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
+          // 4-Column Metric Grid matching Designs/Active_trip.png
+          Row(
+            children: [
+              // Column 1: ETA
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.access_time_rounded, color: accentColor, size: 15),
+                        const SizedBox(width: 4),
+                        Text(
+                          'ETA',
+                          style: TextStyle(
+                            color: context.appTextSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (isApproaching)
-                  const Icon(Icons.notifications_active_rounded,
-                      color: AppColors.warning, size: 20),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Metrics row
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Row(
-              children: <Widget>[
-                _PanelMetric(label: 'ETA', value: eta, accent: badgeColor),
-                _Divider(),
-                _PanelMetric(label: 'Distance', value: dist),
-                _Divider(),
-                _PanelMetric(label: 'Alert at', value: alertAt),
-                _Divider(),
-                _PanelMetric(label: 'Elapsed', value: _formatElapsed()),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Cancel button
-          Padding(
-            padding: EdgeInsets.only(
-              left: 18,
-              right: 18,
-              bottom: MediaQuery.of(context).padding.bottom + 18,
-            ),
-            child: GestureDetector(
-              onTap: onCancel,
-              child: Container(
-                height: 50,
-                decoration: BoxDecoration(
-                  color: AppColors.error.withAlpha(20),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.error, width: 1.5),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    Icon(Icons.stop_circle_rounded,
-                        color: AppColors.error, size: 20),
-                    SizedBox(width: 8),
+                    const SizedBox(height: 6),
                     Text(
-                      'Cancel Trip',
+                      _formatETA(),
                       style: TextStyle(
-                        color: AppColors.error,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        color: context.appTextPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
+
+              Container(width: 1, height: 38, color: context.appBorder),
+
+              // Column 2: Distance
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.alt_route_rounded, color: accentColor, size: 15),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Distance',
+                            style: TextStyle(
+                              color: context.appTextSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatDistance(),
+                        style: TextStyle(
+                          color: context.appTextPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Container(width: 1, height: 38, color: context.appBorder),
+
+              // Column 3: Alert at
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.notifications_active_rounded, color: Color(0xFFFFD600), size: 15),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Alert at',
+                            style: TextStyle(
+                              color: context.appTextSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$alertRadius m',
+                        style: TextStyle(
+                          color: context.appTextPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Container(width: 1, height: 38, color: context.appBorder),
+
+              // Column 4: Cancel Trip
+              Expanded(
+                child: InkWell(
+                  onTap: onCancel,
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.stop_circle_outlined,
+                          color: AppColors.coralAlert,
+                          size: 24,
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Cancel Trip',
+                          style: TextStyle(
+                            color: AppColors.coralAlert,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
-  }
-}
-
-class _PanelMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? accent;
-  const _PanelMetric({required this.label, required this.value, this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: <Widget>[
-          Text(label,
-              style: const TextStyle(
-                  color: AppColors.textSecondary, fontSize: 11)),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            style: TextStyle(
-              color: accent ?? AppColors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(width: 1, height: 30, color: AppColors.border);
   }
 }

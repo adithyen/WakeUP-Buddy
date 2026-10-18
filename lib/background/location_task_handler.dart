@@ -37,19 +37,20 @@ class LocationTaskHandler extends TaskHandler {
     if (_alertTriggered) return;
 
     try {
-      // Use last known position first for instant feedback, then confirm with fresh fix
-      Position? position = await Geolocator.getLastKnownPosition();
-
-      // If no cached position, or it's too old (>30s), get a fresh one
-      if (position == null ||
-          DateTime.now().difference(position.timestamp).inSeconds > 30) {
+      // Request fresh high-accuracy position fix every cycle
+      Position? position;
+      try {
         position = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 8),
+            accuracy: LocationAccuracy.bestForNavigation,
+            timeLimit: Duration(seconds: 4),
           ),
         );
+      } catch (_) {
+        position = await Geolocator.getLastKnownPosition();
       }
+
+      if (position == null) return;
 
       final double distance = Geolocator.distanceBetween(
         position.latitude,

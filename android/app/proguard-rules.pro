@@ -1,3 +1,7 @@
+# WakeUp Buddy Native Platform Views
+-keep class com.wakeupbuddy.wakeup_buddy.** { *; }
+-dontwarn com.wakeupbuddy.wakeup_buddy.**
+
 # Flutter
 -keep class io.flutter.** { *; }
 -keep class io.flutter.plugins.** { *; }
@@ -27,3 +31,17 @@
 
 # Google Play Core (Flutter Deferred Components Optional Dependency)
 -dontwarn com.google.android.play.core.**
+
+# MapLibre GL
+-keep class org.maplibre.android.** { *; }
+-dontwarn org.maplibre.android.**
+-keep class org.maplibre.gl.** { *; }
+
+# Ola Maps SDK & Places SDK
+-keep class com.ola.mapsdk.** { *; }
+-dontwarn com.ola.mapsdk.**
+-keep class com.ola.places.** { *; }
+-dontwarn com.ola.places.**
+-keep class okhttp3.** { *; }
+-dontwarn okhttp3.**
+

@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -13,22 +14,43 @@ import 'features/tracking/services/tracking_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
-    DeviceOrientation.portraitUp,
-  ]);
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('Flutter uncaught error: ${details.exceptionAsString()}');
+  };
 
-  await Hive.initFlutter();
-  await StorageService().init();
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint('Platform uncaught error: $error\n$stack');
+    return true;
+  };
 
-  // Open history / saved-destinations boxes
-  await TripHistoryRepository.openBox();
-  await SavedDestinationsRepository.openBox();
+  try {
+    await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
+      DeviceOrientation.portraitUp,
+    ]);
+  } catch (_) {}
 
-  TrackingService.init();
-  FlutterForegroundTask.initCommunicationPort();
+  try {
+    await Hive.initFlutter();
+    await StorageService().init();
+    await TripHistoryRepository.openBox();
+    await SavedDestinationsRepository.openBox();
+  } catch (e) {
+    debugPrint('Storage initialization warning: $e');
+  }
 
-  // Initialize alarm package — registers broadcast receiver and ring stream.
-  await AlarmService.init();
+  try {
+    TrackingService.init();
+    FlutterForegroundTask.initCommunicationPort();
+  } catch (e) {
+    debugPrint('Foreground service initialization warning: $e');
+  }
+
+  try {
+    await AlarmService.init();
+  } catch (e) {
+    debugPrint('AlarmService initialization warning: $e');
+  }
 
   runApp(const ProviderScope(child: WakeUpBuddyApp()));
 }

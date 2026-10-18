@@ -10,30 +10,41 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
     defaultConfig {
         applicationId = "com.wakeupbuddy.wakeup_buddy"
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = 35
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        versionCode = 12
+        versionName = "0.6.12"
     }
 
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
         debug {
             isMinifyEnabled = false
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            pickFirsts.add("**/libmaplibre.so")
+            pickFirsts.add("**/libc++_shared.so")
+            pickFirsts.add("lib/**/libmaplibre.so")
+            pickFirsts.add("lib/**/libc++_shared.so")
+        }
+        resources {
+            excludes.add("/META-INF/{AL2.0,LGPL2.1}")
+            excludes.add("META-INF/*.kotlin_module")
         }
     }
 }
@@ -47,3 +58,17 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation(files("libs/OlaMapSdk-1.8.4.aar"))
+    implementation(files("libs/Places-sdk-2.4.0.jar"))
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+    implementation("org.maplibre.gl:android-sdk:11.3.0")
+    implementation("org.maplibre.gl:android-plugin-annotation-v9:1.0.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+}
+

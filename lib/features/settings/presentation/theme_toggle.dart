@@ -19,6 +19,11 @@ class ThemeToggle extends ConsumerWidget {
       required String label,
     }) {
       final bool isSelected = selected == option;
+      final Color activeTextColor = isSelected
+          ? (ThemeData.estimateBrightnessForColor(colorScheme.primary) == Brightness.light
+              ? Colors.black
+              : Colors.white)
+          : colorScheme.onSurfaceVariant;
 
       return Expanded(
         child: AnimatedContainer(
@@ -42,7 +47,7 @@ class ThemeToggle extends ConsumerWidget {
                   Icon(
                     icon,
                     size: 18,
-                    color: isSelected ? Colors.white : colorScheme.onSurfaceVariant,
+                    color: activeTextColor,
                   ),
                   const SizedBox(width: AppDimensions.xs),
                   Flexible(
@@ -50,7 +55,7 @@ class ThemeToggle extends ConsumerWidget {
                       label,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: isSelected ? Colors.white : colorScheme.onSurfaceVariant,
+                            color: activeTextColor,
                             fontWeight: FontWeight.w700,
                           ),
                     ),

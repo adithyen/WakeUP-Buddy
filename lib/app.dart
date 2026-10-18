@@ -20,11 +20,15 @@ class WakeUpBuddyApp extends ConsumerStatefulWidget {
 }
 
 class _WakeUpBuddyAppState extends ConsumerState<WakeUpBuddyApp> {
+  /// Track whether the AlarmScreen is currently on the navigation stack so we
+  /// don't push it twice if the state fires more than once.
   bool _alarmScreenVisible = false;
 
   @override
   void initState() {
     super.initState();
+
+    // Listen to the alarm orchestrator — when sounding begins, push AlarmScreen.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.listenManual<AlarmState>(
         alarmOrchestratorProvider,
@@ -32,7 +36,10 @@ class _WakeUpBuddyAppState extends ConsumerState<WakeUpBuddyApp> {
           if (next.phase == AlarmPhase.sounding && !_alarmScreenVisible) {
             _showAlarmScreen();
           }
-          if (next.phase == AlarmPhase.dismissed || next.phase == AlarmPhase.idle) {
+
+          // When alarm is dismissed / snoozed, mark screen as gone
+          if (next.phase == AlarmPhase.dismissed ||
+              next.phase == AlarmPhase.idle) {
             _alarmScreenVisible = false;
           }
         },
@@ -48,7 +55,10 @@ class _WakeUpBuddyAppState extends ConsumerState<WakeUpBuddyApp> {
         opaque: true,
         transitionDuration: const Duration(milliseconds: 400),
         pageBuilder: (BuildContext context, Animation<double> animation, _) =>
-            FadeTransition(opacity: animation, child: const AlarmScreen()),
+            FadeTransition(
+          opacity: animation,
+          child: const AlarmScreen(),
+        ),
       ),
     );
   }
@@ -56,14 +66,14 @@ class _WakeUpBuddyAppState extends ConsumerState<WakeUpBuddyApp> {
   @override
   Widget build(BuildContext context) {
     final ThemeOption themeOption = ref.watch(themeProvider);
-    final Color accent = ref.watch(accentColorProvider);
+    final AppAccentOption accent = ref.watch(accentColorProvider);
 
     return MaterialApp(
       title: 'WakeUp Buddy',
       debugShowCheckedModeBanner: false,
       navigatorKey: appNavigatorKey,
-      theme: AppTheme.buildLightTheme(accent),
-      darkTheme: AppTheme.buildDarkTheme(accent),
+      theme: AppTheme.buildLightTheme(accent.color),
+      darkTheme: AppTheme.buildDarkTheme(accent.color),
       themeMode: themeOption.themeMode,
       home: const PermissionGate(),
     );

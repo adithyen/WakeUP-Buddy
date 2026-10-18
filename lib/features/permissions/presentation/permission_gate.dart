@@ -44,7 +44,8 @@ class _PermissionGateState extends ConsumerState<PermissionGate> with WidgetsBin
       );
     }
 
-    if (permissionState.allCriticalGranted && permissionState.onboardingCompleted) {
+    if ((permissionState.allCriticalGranted && permissionState.onboardingCompleted) ||
+        (permissionState.onboardingCompleted && permissionState.foregroundLocation)) {
       return const HomeScreen();
     }
 
