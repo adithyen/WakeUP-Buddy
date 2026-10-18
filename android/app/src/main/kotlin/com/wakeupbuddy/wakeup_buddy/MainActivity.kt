@@ -26,6 +26,13 @@ class MainActivity : FlutterFragmentActivity() {
                     "ola_native_map_view",
                     OlaMapViewFactory(flutterEngine.dartExecutor.binaryMessenger)
                 )
+            flutterEngine
+                .platformViewsController
+                .registry
+                .registerViewFactory(
+                    "vela_native_map_view",
+                    VelaMapViewFactory(flutterEngine.dartExecutor.binaryMessenger)
+                )
         } catch (t: Throwable) {
             t.printStackTrace()
         }

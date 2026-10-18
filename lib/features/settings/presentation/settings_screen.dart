@@ -32,8 +32,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _apiKeyController = TextEditingController(text: ref.read(mapApiKeyProvider) ?? '');
-    _customStyleController = TextEditingController(text: ref.read(customMapStyleProvider) ?? '');
+    _apiKeyController = TextEditingController(
+      text: ref.read(mapApiKeyProvider) ?? '',
+    );
+    _customStyleController = TextEditingController(
+      text: ref.read(customMapStyleProvider) ?? '',
+    );
     _testConnection();
   }
 
@@ -116,7 +120,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   return InkWell(
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      ref.read(accentColorProvider.notifier).setAccentIndex(index);
+                      ref
+                          .read(accentColorProvider.notifier)
+                          .setAccentIndex(index);
                     },
                     borderRadius: BorderRadius.circular(20),
                     child: Container(
@@ -133,7 +139,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 BoxShadow(
                                   color: accentOpt.color.withValues(alpha: 0.6),
                                   blurRadius: 10,
-                                )
+                                ),
                               ]
                             : null,
                       ),
@@ -144,10 +150,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               const SizedBox(height: 10),
               Text(
                 "This will change the app's primary color and highlights.",
-                style: TextStyle(
-                  color: context.appTextTertiary,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: context.appTextTertiary, fontSize: 12),
               ),
             ],
           ),
@@ -179,7 +182,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 },
                 borderRadius: BorderRadius.circular(14),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: context.appCardElevated,
                     borderRadius: BorderRadius.circular(14),
@@ -187,7 +193,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.tune_rounded, color: context.appAccent, size: 20),
+                      Icon(
+                        Icons.tune_rounded,
+                        color: context.appAccent,
+                        size: 20,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -199,7 +209,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                         ),
                       ),
-                      Icon(Icons.chevron_right_rounded, color: context.appTextSecondary),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: context.appTextSecondary,
+                      ),
                     ],
                   ),
                 ),
@@ -216,7 +229,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             title: 'Map rendering engine',
             children: [
               Text(
-                'Choose how maps and vector layers are rendered on your device.',
+                'Choose how the map is rendered on your device. Vela uses native MapLibre vector tiles; OSM uses raster tiles.',
                 style: TextStyle(
                   color: context.appTextSecondary,
                   fontSize: 13,
@@ -231,7 +244,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   child: InkWell(
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      ref.read(mapRendererProvider.notifier).setRenderer(renderer);
+                      ref
+                          .read(mapRendererProvider.notifier)
+                          .setRenderer(renderer);
                     },
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
@@ -242,15 +257,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             : context.appCardElevated,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isSelected ? context.appAccent : context.appBorder,
+                          color: isSelected
+                              ? context.appAccent
+                              : context.appBorder,
                           width: isSelected ? 1.5 : 1,
                         ),
                       ),
                       child: Row(
                         children: [
                           Icon(
-                            isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
-                            color: isSelected ? context.appAccent : context.appTextTertiary,
+                            isSelected
+                                ? Icons.radio_button_checked_rounded
+                                : Icons.radio_button_unchecked_rounded,
+                            color: isSelected
+                                ? context.appAccent
+                                : context.appTextTertiary,
                             size: 20,
                           ),
                           const SizedBox(width: 12),
@@ -261,7 +282,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 Text(
                                   renderer.displayName,
                                   style: TextStyle(
-                                    color: isSelected ? context.appAccent : context.appTextPrimary,
+                                    color: isSelected
+                                        ? context.appAccent
+                                        : context.appTextPrimary,
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -337,11 +360,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     IconButton(
                       icon: Icon(
-                        _obscureKey ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        _obscureKey
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
                         color: context.appTextSecondary,
                         size: 20,
                       ),
-                      onPressed: () => setState(() => _obscureKey = !_obscureKey),
+                      onPressed: () =>
+                          setState(() => _obscureKey = !_obscureKey),
                     ),
                   ],
                 ),
@@ -356,7 +382,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: context.appAccent,
-                        foregroundColor: ThemeData.estimateBrightnessForColor(context.appAccent) == Brightness.light
+                        foregroundColor:
+                            ThemeData.estimateBrightnessForColor(
+                                  context.appAccent,
+                                ) ==
+                                Brightness.light
                             ? Colors.black
                             : Colors.white,
                         shape: RoundedRectangleBorder(
@@ -365,15 +395,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       icon: const Icon(Icons.save_rounded, size: 18),
-                      label: const Text('Save key', style: TextStyle(fontWeight: FontWeight.w700)),
+                      label: const Text(
+                        'Save key',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       onPressed: () async {
                         final messenger = ScaffoldMessenger.of(context);
                         final key = _apiKeyController.text.trim();
-                        await ref.read(mapApiKeyProvider.notifier).setKey(key.isEmpty ? null : key);
+                        await ref
+                            .read(mapApiKeyProvider.notifier)
+                            .setKey(key.isEmpty ? null : key);
                         await _testConnection();
                         if (mounted) {
                           messenger.showSnackBar(
-                            const SnackBar(content: Text('Ola Maps API key updated!')),
+                            const SnackBar(
+                              content: Text('Ola Maps API key updated!'),
+                            ),
                           );
                         }
                       },
@@ -390,7 +427,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      child: const Text('Clear', style: TextStyle(fontWeight: FontWeight.w600)),
+                      child: const Text(
+                        'Clear',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       onPressed: () async {
                         _apiKeyController.clear();
                         await ref.read(mapApiKeyProvider.notifier).setKey(null);
@@ -412,7 +452,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     decoration: BoxDecoration(
                       color: _isChecking
                           ? Colors.orange
-                          : (_isConnected == true ? AppColors.success : AppColors.error),
+                          : (_isConnected == true
+                                ? AppColors.success
+                                : AppColors.error),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -421,10 +463,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     _isChecking
                         ? 'Status: Verifying connection...'
                         : (_isConnected == true
-                            ? 'Status: Ola Maps connected'
-                            : 'Status: Offline / Invalid API Key'),
+                              ? 'Status: Ola Maps connected'
+                              : 'Status: Offline / Invalid API Key'),
                     style: TextStyle(
-                      color: _isConnected == true ? context.appAccent : context.appTextSecondary,
+                      color: _isConnected == true
+                          ? context.appAccent
+                          : context.appTextSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
@@ -459,10 +503,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                       child: TextField(
                         controller: _customStyleController,
-                        style: TextStyle(color: context.appTextPrimary, fontSize: 13),
+                        style: TextStyle(
+                          color: context.appTextPrimary,
+                          fontSize: 13,
+                        ),
                         decoration: InputDecoration(
                           hintText: 'Style1-Dark or published style URL',
-                          hintStyle: TextStyle(color: context.appTextTertiary, fontSize: 13),
+                          hintStyle: TextStyle(
+                            color: context.appTextTertiary,
+                            fontSize: 13,
+                          ),
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.zero,
                         ),
@@ -478,7 +528,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         borderRadius: BorderRadius.circular(12),
                         side: BorderSide(color: context.appBorder),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                     ),
                     onPressed: () async {
                       final messenger = ScaffoldMessenger.of(context);
@@ -488,11 +541,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           .setStyle(style.isEmpty ? null : style);
                       if (mounted) {
                         messenger.showSnackBar(
-                          const SnackBar(content: Text('Custom map style configured!')),
+                          const SnackBar(
+                            content: Text('Custom map style configured!'),
+                          ),
                         );
                       }
                     },
-                    child: const Text('Set Style', style: TextStyle(fontWeight: FontWeight.w700)),
+                    child: const Text(
+                      'Set Style',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ],
               ),
@@ -513,7 +571,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 title: 'Trip History',
                 onTap: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
+                    MaterialPageRoute<void>(
+                      builder: (_) => const HistoryScreen(),
+                    ),
                   );
                 },
               ),
@@ -527,7 +587,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   final confirm = await _showConfirmDialog(
                     context,
                     title: 'Clear Trip History?',
-                    message: 'All past trip records will be permanently removed.',
+                    message:
+                        'All past trip records will be permanently removed.',
                   );
                   if (confirm == true) {
                     await ref.read(tripHistoryProvider.notifier).clearAll();
@@ -552,10 +613,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     message: 'All bookmarked destinations will be removed.',
                   );
                   if (confirm == true) {
-                    await ref.read(savedDestinationsProvider.notifier).clearAll();
+                    await ref
+                        .read(savedDestinationsProvider.notifier)
+                        .clearAll();
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Saved destinations cleared.')),
+                        const SnackBar(
+                          content: Text('Saved destinations cleared.'),
+                        ),
                       );
                     }
                   }
@@ -583,7 +648,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         border: Border.all(color: context.appBorder),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: context.isDarkMode ? 0.3 : 0.05),
+            color: Colors.black.withValues(
+              alpha: context.isDarkMode ? 0.3 : 0.05,
+            ),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -629,7 +696,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           children: [
             Icon(
               icon,
-              color: isDestructive ? AppColors.coralAlert : context.appTextSecondary,
+              color: isDestructive
+                  ? AppColors.coralAlert
+                  : context.appTextSecondary,
               size: 20,
             ),
             const SizedBox(width: 12),
@@ -637,13 +706,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               child: Text(
                 title,
                 style: TextStyle(
-                  color: isDestructive ? AppColors.coralAlert : context.appTextPrimary,
+                  color: isDestructive
+                      ? AppColors.coralAlert
+                      : context.appTextPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            Icon(Icons.chevron_right_rounded, color: context.appTextSecondary, size: 18),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: context.appTextSecondary,
+              size: 18,
+            ),
           ],
         ),
       ),
@@ -660,14 +735,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appCard,
         title: Text(title, style: TextStyle(color: context.appTextPrimary)),
-        content: Text(message, style: TextStyle(color: context.appTextSecondary)),
+        content: Text(
+          message,
+          style: TextStyle(color: context.appTextSecondary),
+        ),
         actions: [
           TextButton(
-            child: Text('Cancel', style: TextStyle(color: context.appTextSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appTextSecondary),
+            ),
             onPressed: () => Navigator.of(ctx).pop(false),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.coralAlert),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.coralAlert,
+            ),
             child: const Text('Clear', style: TextStyle(color: Colors.white)),
             onPressed: () => Navigator.of(ctx).pop(true),
           ),

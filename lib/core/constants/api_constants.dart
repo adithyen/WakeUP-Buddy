@@ -53,6 +53,12 @@ abstract final class ApiConstants {
   static const String osmStyle = 'https://tiles.openfreemap.org/styles/bright';
   static const String osmDarkStyle =
       'https://tiles.openfreemap.org/styles/dark';
+  // Vela-style keyless OpenFreeMap vector styles. These are loaded by the
+  // native MapLibre renderer, not by flutter_map's raster TileLayer.
+  static const String velaLightStyle =
+      'https://tiles.openfreemap.org/styles/liberty';
+  static const String velaDarkStyle =
+      'https://tiles.openfreemap.org/styles/dark';
   static const String osmTiles =
       'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 

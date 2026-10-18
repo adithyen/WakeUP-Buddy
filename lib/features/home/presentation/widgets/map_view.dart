@@ -15,6 +15,7 @@ import '../../../../core/services/map_tile_provider.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../providers/map_provider.dart';
 import 'native_ola_map_view.dart';
+import 'native_vela_map_view.dart';
 
 class MapView extends ConsumerStatefulWidget {
   final LatLng? initialCenter;
@@ -47,6 +48,7 @@ class MapView extends ConsumerStatefulWidget {
 class _MapViewState extends ConsumerState<MapView> {
   late final MapController _mapController = MapController();
   OlaMapController? _nativeOlaController;
+  VelaMapController? _nativeVelaController;
   LatLng? _lastKnownLocation;
   bool _nativeOlaHasError = false;
 
@@ -95,33 +97,67 @@ class _MapViewState extends ConsumerState<MapView> {
     }
   }
 
+  void _syncNativeVelaState(Color accent) {
+    final controller = _nativeVelaController;
+    if (controller == null) return;
+    final hex =
+        '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    if (widget.destinationMarker != null) {
+      controller.setDestination(
+        lat: widget.destinationMarker!.latitude,
+        lng: widget.destinationMarker!.longitude,
+        radiusMeters: widget.alertRadius ?? 500,
+        colorHex: hex,
+      );
+    }
+    if (widget.routePoints != null && widget.routePoints!.isNotEmpty) {
+      final points = widget.routePoints!
+          .map((p) => <double>[p.latitude, p.longitude])
+          .toList(growable: false);
+      controller.drawRoute(points: points, colorHex: hex, width: 6);
+      controller.fitBounds(points: points, padding: 120);
+    }
+    if (_lastKnownLocation != null) {
+      controller.updateUserLocation(
+        lat: _lastKnownLocation!.latitude,
+        lng: _lastKnownLocation!.longitude,
+        colorHex: hex,
+      );
+    }
+  }
+
   @override
   void didUpdateWidget(MapView oldWidget) {
     super.didUpdateWidget(oldWidget);
     final accent = context.appAccent;
     _syncNativeOlaState(accent);
+    _syncNativeVelaState(accent);
 
     if (widget.routePoints != null && widget.routePoints!.isNotEmpty) {
       final bounds = LatLngBounds.fromPoints(widget.routePoints!);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _mapController.fitCamera(
-          CameraFit.bounds(
-            bounds: bounds,
-            padding: const EdgeInsets.only(
-              left: 60,
-              right: 60,
-              top: 100,
-              bottom: 260,
+        if (ref.read(mapRendererProvider) != MapRendererType.vela) {
+          _mapController.fitCamera(
+            CameraFit.bounds(
+              bounds: bounds,
+              padding: const EdgeInsets.only(
+                left: 60,
+                right: 60,
+                top: 100,
+                bottom: 260,
+              ),
             ),
-          ),
-        );
+          );
+        }
       });
     } else if (widget.destinationMarker != null &&
         widget.destinationMarker != oldWidget.destinationMarker) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _mapController.move(widget.destinationMarker!, widget.initialZoom);
+        if (ref.read(mapRendererProvider) != MapRendererType.vela) {
+          _mapController.move(widget.destinationMarker!, widget.initialZoom);
+        }
         _nativeOlaController?.moveCamera(
           lat: widget.destinationMarker!.latitude,
           lng: widget.destinationMarker!.longitude,
@@ -152,7 +188,9 @@ class _MapViewState extends ConsumerState<MapView> {
       final LatLng? point = next.valueOrNull;
       if (point == null || point == _lastKnownLocation) return;
       _lastKnownLocation = point;
-      if (widget.followUser && widget.destinationMarker == null) {
+      if (renderer != MapRendererType.vela &&
+          widget.followUser &&
+          widget.destinationMarker == null) {
         _mapController.move(point, _mapController.camera.zoom);
         _nativeOlaController?.moveCamera(
           lat: point.latitude,
@@ -163,6 +201,11 @@ class _MapViewState extends ConsumerState<MapView> {
       final hex =
           '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
       _nativeOlaController?.updateUserLocation(
+        lat: point.latitude,
+        lng: point.longitude,
+        colorHex: hex,
+      );
+      _nativeVelaController?.updateUserLocation(
         lat: point.latitude,
         lng: point.longitude,
         colorHex: hex,
@@ -187,8 +230,15 @@ class _MapViewState extends ConsumerState<MapView> {
       }
       if (point != null) {
         _lastKnownLocation = point;
-        _mapController.move(point, 16.0);
+        if (renderer != MapRendererType.vela) {
+          _mapController.move(point, 16.0);
+        }
         _nativeOlaController?.moveCamera(
+          lat: point.latitude,
+          lng: point.longitude,
+          zoom: 16.0,
+        );
+        _nativeVelaController?.moveCamera(
           lat: point.latitude,
           lng: point.longitude,
           zoom: 16.0,
@@ -218,6 +268,22 @@ class _MapViewState extends ConsumerState<MapView> {
       theme,
       accent,
     );
+
+    if (renderer == MapRendererType.vela && !kIsWeb && Platform.isAndroid) {
+      return NativeVelaMapView(
+        initialLat: fallbackCenter.latitude,
+        initialLng: fallbackCenter.longitude,
+        initialZoom: widget.initialZoom,
+        styleUrl: isDark
+            ? ApiConstants.velaDarkStyle
+            : ApiConstants.velaLightStyle,
+        fallback: flutterMapFallback,
+        onMapReady: (controller) {
+          _nativeVelaController = controller;
+          _syncNativeVelaState(accent);
+        },
+      );
+    }
 
     // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
     if (renderer == MapRendererType.ola &&

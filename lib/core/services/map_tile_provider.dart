@@ -8,8 +8,8 @@ abstract class MapTileConfig {
   TileProvider get tileProvider;
 }
 
-/// Vela Maps tile configuration (inspired by https://github.com/PimpinPumpkin/Vela)
-/// Uses high-speed OpenFreeMap / OSM tiles that load cleanly worldwide with no API keys.
+/// Raster fallback used by Vela on platforms without the native Android
+/// MapLibre view. Android Vela uses OpenFreeMap vector styles instead.
 class VelaDarkTileConfig implements MapTileConfig {
   @override
   String get urlTemplate => 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';

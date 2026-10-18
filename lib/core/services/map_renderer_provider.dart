@@ -24,7 +24,7 @@ extension MapRendererTypeExtension on MapRendererType {
       case MapRendererType.ola:
         return 'Official Ola vector tiles via native Android SDK';
       case MapRendererType.vela:
-        return 'OpenFreeMap degoogled vector stack (Vela)';
+        return 'Native MapLibre vector tiles from OpenFreeMap';
       case MapRendererType.osm:
         return 'Standard OpenStreetMap community raster tiles';
     }

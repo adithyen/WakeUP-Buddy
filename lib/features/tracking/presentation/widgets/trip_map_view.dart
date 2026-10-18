@@ -11,6 +11,7 @@ import '../../../../core/services/map_renderer_provider.dart';
 import '../../../../core/services/map_tile_provider.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../home/presentation/widgets/native_ola_map_view.dart';
+import '../../../home/presentation/widgets/native_vela_map_view.dart';
 import '../../../home/providers/map_provider.dart';
 import '../../data/models/trip_state.dart';
 import '../../providers/tracking_provider.dart';
@@ -27,6 +28,7 @@ class TripMapView extends ConsumerStatefulWidget {
 class _TripMapViewState extends ConsumerState<TripMapView> {
   final MapController _mapController = MapController();
   OlaMapController? _nativeOlaController;
+  VelaMapController? _nativeVelaController;
   LatLng? _lastPosition;
   bool _initialMoveCompleted = false;
   bool _nativeOlaHasError = false;
@@ -49,7 +51,9 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
   void _moveToUser(LatLng position, double? distance) {
     if (position == _lastPosition) return;
     _lastPosition = position;
-    _mapController.move(position, _zoomForDistance(distance));
+    if (ref.read(mapRendererProvider) != MapRendererType.vela) {
+      _mapController.move(position, _zoomForDistance(distance));
+    }
     _nativeOlaController?.moveCamera(
       lat: position.latitude,
       lng: position.longitude,
@@ -59,18 +63,20 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
 
   void _fitBothMarkers(LatLng user, LatLng dest) {
     final LatLngBounds bounds = LatLngBounds.fromPoints(<LatLng>[user, dest]);
-    _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: bounds,
-        padding: const EdgeInsets.only(
-          left: 60,
-          right: 60,
-          top: 100,
-          bottom: 220,
+    if (ref.read(mapRendererProvider) != MapRendererType.vela) {
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.only(
+            left: 60,
+            right: 60,
+            top: 100,
+            bottom: 220,
+          ),
+          maxZoom: 16,
         ),
-        maxZoom: 16,
-      ),
-    );
+      );
+    }
     _nativeOlaController?.fitBounds(
       points: [
         [user.latitude, user.longitude],
@@ -116,6 +122,40 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
     }
   }
 
+  void _syncNativeVelaState(TripState trip, Color accent) {
+    final controller = _nativeVelaController;
+    if (controller == null) return;
+    final hex =
+        '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    if (trip.destination != null) {
+      controller.setDestination(
+        lat: trip.destination!.latitude,
+        lng: trip.destination!.longitude,
+        radiusMeters: (trip.alertSettings?.alertRadiusMeters ?? 500).toDouble(),
+        colorHex: hex,
+      );
+    }
+    final user = trip.currentLatitude != null && trip.currentLongitude != null
+        ? LatLng(trip.currentLatitude!, trip.currentLongitude!)
+        : null;
+    if (user != null) {
+      controller.updateUserLocation(
+        lat: user.latitude,
+        lng: user.longitude,
+        colorHex: hex,
+      );
+    }
+    if (trip.routePolyline.isNotEmpty) {
+      controller.drawRoute(
+        points: trip.routePolyline
+            .map((p) => <double>[p.latitude, p.longitude])
+            .toList(growable: false),
+        colorHex: hex,
+        width: 6,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final TripState trip = ref.watch(trackingProvider);
@@ -154,6 +194,7 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
           _initialMoveCompleted = true;
         }
         _syncNativeOlaState(trip, accent);
+        _syncNativeVelaState(trip, accent);
       });
     }
 
@@ -289,6 +330,23 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
         ],
       ),
     );
+
+    // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
+    if (renderer == MapRendererType.vela && !kIsWeb && Platform.isAndroid) {
+      return NativeVelaMapView(
+        initialLat: fallbackCenter.latitude,
+        initialLng: fallbackCenter.longitude,
+        initialZoom: _zoomForDistance(trip.currentDistanceMeters),
+        styleUrl: isDark
+            ? ApiConstants.velaDarkStyle
+            : ApiConstants.velaLightStyle,
+        fallback: flutterMapFallback,
+        onMapReady: (controller) {
+          _nativeVelaController = controller;
+          _syncNativeVelaState(trip, accent);
+        },
+      );
+    }
 
     // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
     if (renderer == MapRendererType.ola &&
