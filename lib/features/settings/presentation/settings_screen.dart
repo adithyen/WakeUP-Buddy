@@ -22,7 +22,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _apiKeyController;
-  late final TextEditingController _customStyleController;
   bool _obscureKey = true;
   bool? _isConnected;
   bool _isChecking = false;
@@ -35,16 +34,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _apiKeyController = TextEditingController(
       text: ref.read(mapApiKeyProvider) ?? '',
     );
-    _customStyleController = TextEditingController(
-      text: ref.read(customMapStyleProvider) ?? '',
-    );
     _testConnection();
   }
 
   @override
   void dispose() {
     _apiKeyController.dispose();
-    _customStyleController.dispose();
     super.dispose();
   }
 
@@ -471,85 +466,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           : context.appTextSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 18),
-              Divider(color: context.appBorder),
-              const SizedBox(height: 10),
-
-              // Custom Style URL / ID input
-              Text(
-                'Custom Vector Style (e.g. Style1-Dark)',
-                style: TextStyle(
-                  color: context.appTextSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      height: 48,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: context.appCardElevated,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: context.appBorder),
-                      ),
-                      child: TextField(
-                        controller: _customStyleController,
-                        style: TextStyle(
-                          color: context.appTextPrimary,
-                          fontSize: 13,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Style1-Dark or published style URL',
-                          hintStyle: TextStyle(
-                            color: context.appTextTertiary,
-                            fontSize: 13,
-                          ),
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: context.appCardElevated,
-                      foregroundColor: context.appAccent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: context.appBorder),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                    ),
-                    onPressed: () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      final style = _customStyleController.text.trim();
-                      await ref
-                          .read(customMapStyleProvider.notifier)
-                          .setStyle(style.isEmpty ? null : style);
-                      if (mounted) {
-                        messenger.showSnackBar(
-                          const SnackBar(
-                            content: Text('Custom map style configured!'),
-                          ),
-                        );
-                      }
-                    },
-                    child: const Text(
-                      'Set Style',
-                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],

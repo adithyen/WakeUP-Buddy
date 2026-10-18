@@ -19,8 +19,8 @@ android {
         applicationId = "com.wakeupbuddy.wakeup_buddy"
         minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.6.12"
+        versionCode = 16
+        versionName = "0.6.16"
     }
 
     buildTypes {
@@ -61,11 +61,11 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    implementation(files("libs/OlaMapSdk-1.8.4.aar"))
+    implementation(files("libs/OlaMapSdk-1.8.5.aar"))
     implementation(files("libs/Places-sdk-2.4.0.jar"))
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("org.maplibre.gl:android-sdk:11.3.0")
-    implementation("org.maplibre.gl:android-plugin-annotation-v9:1.0.0")
+    implementation("org.maplibre.gl:android-plugin-annotation-v9:3.0.2")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")

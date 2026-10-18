@@ -110,6 +110,24 @@ class OlaMapController {
     }
   }
 
+  Future<void> clearRoute() async {
+    if (_isDisposed) return;
+    try {
+      await _channel.invokeMethod('clearRoute');
+    } catch (e) {
+      debugPrint('[OlaMapController] clearRoute error: $e');
+    }
+  }
+
+  Future<void> clearDestination() async {
+    if (_isDisposed) return;
+    try {
+      await _channel.invokeMethod('clearDestination');
+    } catch (e) {
+      debugPrint('[OlaMapController] clearDestination error: $e');
+    }
+  }
+
   Future<void> clearAll() async {
     if (_isDisposed) return;
     try {

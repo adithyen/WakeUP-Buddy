@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/sensor_speed_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../destination/providers/destination_provider.dart';
+import '../../destination/providers/route_selection_provider.dart';
 import '../data/models/trip_state.dart';
 import '../providers/tracking_provider.dart';
 import 'widgets/gps_status_banner.dart';
@@ -48,6 +50,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
         (TripState? previous, TripState next) {
           if (next.status == TripStatus.idle && !_navigated && mounted) {
             _navigated = true;
+            ref.read(selectedDestinationProvider.notifier).clear();
+            ref.read(routeSelectionProvider.notifier).clear();
             Navigator.of(context).popUntil((route) => route.isFirst);
           }
         },
@@ -66,6 +70,8 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
     final bool confirmed = await showCancelTripDialog(context);
     if (confirmed && mounted) {
       await ref.read(trackingProvider.notifier).stopTrip();
+      ref.read(selectedDestinationProvider.notifier).clear();
+      ref.read(routeSelectionProvider.notifier).clear();
       if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
     }
     return false;
@@ -74,7 +80,9 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
   @override
   Widget build(BuildContext context) {
     final TripState trip = ref.watch(trackingProvider);
-    final double liveSpeedKmh = ref.watch(speedTelemetryProvider).speedKmh;
+    final SpeedTelemetryState speedTelemetry = ref.watch(speedTelemetryProvider);
+    final double liveSpeedKmh = speedTelemetry.speedKmh;
+    final MotionPhase motionPhase = speedTelemetry.motionPhase;
     final bool isDark = context.isDarkMode;
     final Color accent = context.appAccent;
 
@@ -193,7 +201,10 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
               Positioned(
                 left: 20,
                 bottom: 215,
-                child: HudSpeedometer(speedKmh: liveSpeedKmh),
+                child: HudSpeedometer(
+                  speedKmh: liveSpeedKmh,
+                  motionPhase: motionPhase,
+                ),
               ),
 
               // 6. MAP ACTION BUTTONS

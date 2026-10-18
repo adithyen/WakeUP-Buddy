@@ -27,8 +27,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    ref.read(destinationSearchProvider.notifier).clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
     });
   }
 
@@ -40,6 +43,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _onQueryChanged(String query) {
+    setState(() {});
+    if (query.trim().isEmpty) {
+      ref.read(destinationSearchProvider.notifier).clear();
+      return;
+    }
     final LatLng? userPos = ref.read(currentLocationProvider).valueOrNull;
     ref.read(destinationSearchProvider.notifier).autocomplete(
           query,
@@ -209,6 +217,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         onPressed: () {
                           _controller.clear();
                           ref.read(destinationSearchProvider.notifier).clear();
+                          setState(() {});
                         },
                       ),
                     if (isLoading)
@@ -232,11 +241,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
             // Results List
             Expanded(
-              child: suggestions.isEmpty && !isLoading
+              child: (_controller.text.trim().isEmpty || (suggestions.isEmpty && !isLoading))
                   ? _buildEmptyOrInitialState(savedDestinations, accent)
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                      itemCount: suggestions.length,
+                      itemCount: _controller.text.trim().isNotEmpty ? suggestions.length : 0,
                       separatorBuilder: (_, __) => Divider(
                         color: context.appBorder.withValues(alpha: 0.5),
                         height: 1,
@@ -301,52 +310,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                                           height: 1.25,
                                         ),
                                       ),
-                                      if (suggestion.distanceMeters != null || suggestion.durationSeconds != null) ...[
-                                        const SizedBox(height: 4),
-                                        Row(
-                                          children: [
-                                            if (suggestion.distanceMeters != null) ...[
-                                              Icon(
-                                                Icons.near_me_rounded,
-                                                size: 13,
-                                                color: accent,
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                suggestion.distanceMeters! >= 1000
-                                                    ? '${(suggestion.distanceMeters! / 1000).toStringAsFixed(1)} km'
-                                                    : '${suggestion.distanceMeters} m',
-                                                style: TextStyle(
-                                                  color: accent,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ],
-                                            if (suggestion.distanceMeters != null && suggestion.durationSeconds != null)
-                                              Padding(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6),
-                                                child: Text('•', style: TextStyle(color: context.appTextTertiary, fontSize: 11)),
-                                              ),
-                                            if (suggestion.durationSeconds != null) ...[
-                                              Icon(
-                                                Icons.access_time_rounded,
-                                                size: 13,
-                                                color: context.appTextSecondary,
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                '${(suggestion.durationSeconds! / 60).round()} min',
-                                                style: TextStyle(
-                                                  color: context.appTextSecondary,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
-                                          ],
-                                        ),
-                                      ],
                                     ],
                                   ),
                                 ),

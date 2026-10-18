@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as p;
 
-import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_dimensions.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../data/models/alert_settings.dart';
@@ -186,17 +185,17 @@ class _SoundPickerState extends ConsumerState<SoundPicker> {
         Text(
           '/storage/emulated/0/Ringtones',
           style: theme.textTheme.bodySmall?.copyWith(
-            color: AppColors.darkTextSecondary,
+            color: context.appTextSecondary,
             fontFamily: 'monospace',
           ),
         ),
         const SizedBox(height: AppDimensions.sm),
         if (_systemRingtones.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
               'No ringtones found in device Ringtones folder',
-              style: TextStyle(color: AppColors.darkTextTertiary, fontSize: 13),
+              style: TextStyle(color: context.appTextTertiary, fontSize: 13),
             ),
           )
         else
@@ -376,12 +375,12 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: <Widget>[
-        Icon(icon, size: 18, color: AppColors.limeAccent),
+        Icon(icon, size: 18, color: context.appAccent),
         const SizedBox(width: 8),
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: context.appTextPrimary,
             fontWeight: FontWeight.w700,
             fontSize: 15,
           ),

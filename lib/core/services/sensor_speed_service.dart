@@ -4,9 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
-/// Provider for sensor-fused speed in km/h.
-/// Provides smooth walking (1-5 km/h) and commute speed telemetry,
-/// filtering out stationary GPS jitter (< 0.6 km/h) without suppressing real human walking.
+/// Motion phases classified via real-time accelerometer and GPS sensor fusion.
+enum MotionPhase {
+  stationary,
+  walking,
+  slowTraffic,
+  transit,
+}
+
+/// Provider for sensor-fused speed in km/h and motion classification.
 final speedTelemetryProvider =
     StateNotifierProvider<SpeedTelemetryNotifier, SpeedTelemetryState>((ref) {
   return SpeedTelemetryNotifier();
@@ -16,111 +22,191 @@ class SpeedTelemetryState {
   final double speedKmh;
   final bool isMoving;
   final double accelerationMagnitude;
+  final MotionPhase motionPhase;
 
   const SpeedTelemetryState({
     required this.speedKmh,
     required this.isMoving,
     required this.accelerationMagnitude,
+    this.motionPhase = MotionPhase.stationary,
   });
+
+  String get phaseLabel {
+    switch (motionPhase) {
+      case MotionPhase.stationary:
+        return 'Stationary';
+      case MotionPhase.walking:
+        return 'Walking';
+      case MotionPhase.slowTraffic:
+        return 'Slow Traffic';
+      case MotionPhase.transit:
+        return 'In Transit';
+    }
+  }
 
   factory SpeedTelemetryState.initial() => const SpeedTelemetryState(
         speedKmh: 0.0,
         isMoving: false,
         accelerationMagnitude: 0.0,
+        motionPhase: MotionPhase.stationary,
       );
 
   SpeedTelemetryState copyWith({
     double? speedKmh,
     bool? isMoving,
     double? accelerationMagnitude,
+    MotionPhase? motionPhase,
   }) {
     return SpeedTelemetryState(
       speedKmh: speedKmh ?? this.speedKmh,
       isMoving: isMoving ?? this.isMoving,
-      accelerationMagnitude: accelerationMagnitude ?? this.accelerationMagnitude,
+      accelerationMagnitude:
+          accelerationMagnitude ?? this.accelerationMagnitude,
+      motionPhase: motionPhase ?? this.motionPhase,
     );
   }
 }
 
 class SpeedTelemetryNotifier extends StateNotifier<SpeedTelemetryState> {
-  StreamSubscription<UserAccelerometerEvent>? _accelSub;
+  StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<Position>? _gpsSub;
 
-  final List<double> _recentMagnitudes = [];
-  static const int _windowSize = 12;
-  static const double _stationaryThreshold = 0.08; // m/s^2 - truly sitting still
+  static const int _windowSize = 15;
 
   double _filteredSpeedKmh = 0.0;
-  static const double _smoothingFactor = 0.55; // Quick responsive smoothing
+  static const double _smoothingFactor = 0.55;
 
   SpeedTelemetryNotifier() : super(SpeedTelemetryState.initial()) {
     _initSensors();
   }
 
   void _initSensors() {
-    // 1. User accelerometer monitors motion activity (walking stride dynamics)
+    // 1. Dual Accelerometer Stream: Raw accelerometer works on 100% of Android devices
     try {
-      _accelSub = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
-        final mag = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
-        _recentMagnitudes.add(mag);
-        if (_recentMagnitudes.length > _windowSize) {
-          _recentMagnitudes.removeAt(0);
-        }
-
-        final avgMag = _recentMagnitudes.isNotEmpty
-            ? _recentMagnitudes.reduce((a, b) => a + b) / _recentMagnitudes.length
-            : 0.0;
-
-        final bool moving = avgMag > _stationaryThreshold;
-
-        // When truly resting on a flat surface and filtered speed is already negligible, settle to 0
-        if (!moving && _filteredSpeedKmh < 0.6) {
-          _filteredSpeedKmh = 0.0;
-          state = state.copyWith(
-            speedKmh: 0.0,
-            isMoving: false,
-            accelerationMagnitude: avgMag,
-          );
-        } else {
-          state = state.copyWith(
-            isMoving: moving,
-            accelerationMagnitude: avgMag,
-          );
-        }
+      _accelSub = accelerometerEventStream().listen((AccelerometerEvent event) {
+        _processAccelerometerData(event.x, event.y, event.z);
       }, onError: (_) {});
     } catch (_) {}
 
-    // 2. High-precision GPS stream for accurate walking and transit speed
+    // 2. High-precision GPS stream for accurate ground speed
     try {
       _gpsSub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 1, // 1 meter resolution captures walking cadence
+          distanceFilter: 1,
         ),
       ).listen((Position position) {
-        double rawKmh = (position.speed >= 0 ? position.speed : 0.0) * 3.6;
-
-        // Noise floor cutoff: stationary table drift is typically < 0.5 km/h
-        if (rawKmh < 0.5 && !state.isMoving) {
-          rawKmh = 0.0;
-        }
-
-        // Low-pass exponential moving average filter
-        _filteredSpeedKmh =
-            (_smoothingFactor * rawKmh) + ((1.0 - _smoothingFactor) * _filteredSpeedKmh);
-
-        if (_filteredSpeedKmh < 0.4) {
-          _filteredSpeedKmh = 0.0;
-        }
-
-        final double displaySpeed = double.parse(_filteredSpeedKmh.toStringAsFixed(1));
-
-        state = state.copyWith(
-          speedKmh: displaySpeed,
-          isMoving: displaySpeed > 0.0 || state.isMoving,
-        );
+        _processGpsData(position);
       }, onError: (_) {});
     } catch (_) {}
+  }
+
+  double _gravityBaseline = 9.80665;
+  final List<double> _dynamicAccels = [];
+  final List<DateTime> _recentStepTimes = [];
+  DateTime _lastStepCandidate = DateTime.now();
+
+  void _processAccelerometerData(double x, double y, double z) {
+    final double totalMag = sqrt(x * x + y * y + z * z);
+    // Exponential baseline tracking for local gravity
+    _gravityBaseline = 0.98 * _gravityBaseline + 0.02 * totalMag;
+    final double dynamicAccel = (totalMag - _gravityBaseline).abs();
+
+    _dynamicAccels.add(dynamicAccel);
+    if (_dynamicAccels.length > _windowSize) {
+      _dynamicAccels.removeAt(0);
+    }
+
+    final double avgDynamic = _dynamicAccels.isNotEmpty
+        ? _dynamicAccels.reduce((a, b) => a + b) / _dynamicAccels.length
+        : 0.0;
+
+    // Detect walking footstep impacts (dynamic acceleration peak > 0.85 m/s² with min interval)
+    final now = DateTime.now();
+    if (dynamicAccel > 0.85 && now.difference(_lastStepCandidate).inMilliseconds > 260) {
+      _lastStepCandidate = now;
+      _recentStepTimes.add(now);
+    }
+    // Retain steps within the last 3.5 seconds
+    _recentStepTimes.removeWhere((t) => now.difference(t).inMilliseconds > 3500);
+
+    // Variance calculation across dynamic acceleration window
+    double variance = 0.0;
+    if (_dynamicAccels.length > 2) {
+      final sumSquares = _dynamicAccels.fold<double>(
+        0.0,
+        (acc, val) => acc + pow(val - avgDynamic, 2),
+      );
+      variance = sumSquares / _dynamicAccels.length;
+    }
+
+    final bool isRhythmicWalking = _recentStepTimes.length >= 2 || (avgDynamic > 0.40 && variance > 0.06);
+
+    MotionPhase phase;
+    double currentSpeed = _filteredSpeedKmh;
+
+    if (isRhythmicWalking && currentSpeed < 8.0) {
+      phase = MotionPhase.walking;
+      // Synthesize realistic walking pace when GPS is lagging or indoors
+      if (currentSpeed < 1.8) {
+        final cadenceSteps = _recentStepTimes.length;
+        currentSpeed = (3.2 + (cadenceSteps * 0.4)).clamp(3.5, 5.5);
+      }
+    } else if (currentSpeed > 18.0) {
+      phase = MotionPhase.transit;
+    } else if (currentSpeed >= 1.5 && currentSpeed <= 18.0) {
+      // In slow traffic: moving forward on GPS without rhythmic footsteps
+      phase = MotionPhase.slowTraffic;
+    } else {
+      phase = MotionPhase.stationary;
+      if (avgDynamic < 0.20 && _recentStepTimes.isEmpty) {
+        currentSpeed = 0.0;
+        _filteredSpeedKmh = 0.0;
+      }
+    }
+
+    state = state.copyWith(
+      speedKmh: double.parse(currentSpeed.toStringAsFixed(1)),
+      isMoving: phase != MotionPhase.stationary,
+      accelerationMagnitude: avgDynamic,
+      motionPhase: phase,
+    );
+  }
+
+  void _processGpsData(Position position) {
+    double rawKmh = (position.speed >= 0 ? position.speed : 0.0) * 3.6;
+
+    if (rawKmh < 0.5 && !state.isMoving) {
+      rawKmh = 0.0;
+    }
+
+    _filteredSpeedKmh =
+        (_smoothingFactor * rawKmh) + ((1.0 - _smoothingFactor) * _filteredSpeedKmh);
+
+    if (_filteredSpeedKmh < 0.4 && state.motionPhase == MotionPhase.stationary) {
+      _filteredSpeedKmh = 0.0;
+    }
+
+    double displaySpeed = _filteredSpeedKmh;
+    MotionPhase phase = state.motionPhase;
+
+    if (phase == MotionPhase.walking && displaySpeed < 1.8) {
+      displaySpeed = state.speedKmh > 0 ? state.speedKmh : 4.0;
+    } else if (displaySpeed > 18.0) {
+      phase = MotionPhase.transit;
+    } else if (displaySpeed >= 1.5 && displaySpeed <= 18.0) {
+      phase = (phase == MotionPhase.walking && _recentStepTimes.isNotEmpty)
+          ? MotionPhase.walking
+          : MotionPhase.slowTraffic;
+    } else {
+      phase = _recentStepTimes.isNotEmpty ? MotionPhase.walking : MotionPhase.stationary;
+    }
+
+    state = state.copyWith(
+      speedKmh: double.parse(displaySpeed.toStringAsFixed(1)),
+      isMoving: phase != MotionPhase.stationary,
+      motionPhase: phase,
+    );
   }
 
   @override

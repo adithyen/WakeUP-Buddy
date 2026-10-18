@@ -28,6 +28,7 @@ class _DestinationSearchSheetState
     super.initState();
     _controller = TextEditingController();
     _focusNode = FocusNode();
+    ref.read(destinationSearchProvider.notifier).clear();
     // Auto-focus keyboard when sheet opens
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
@@ -196,6 +197,12 @@ class _DestinationSearchSheetState
                       ),
                       onChanged: (String value) {
                         setState(() {}); // refresh suffixIcon
+                        if (value.trim().isEmpty) {
+                          ref
+                              .read(destinationSearchProvider.notifier)
+                              .clear();
+                          return;
+                        }
                         ref
                             .read(destinationSearchProvider.notifier)
                             .autocomplete(
@@ -205,6 +212,12 @@ class _DestinationSearchSheetState
                             );
                       },
                       onSubmitted: (String value) {
+                        if (value.trim().isEmpty) {
+                          ref
+                              .read(destinationSearchProvider.notifier)
+                              .clear();
+                          return;
+                        }
                         ref.read(destinationSearchProvider.notifier).search(
                               value,
                               nearLat: currentLocation?.latitude,
@@ -239,13 +252,16 @@ class _DestinationSearchSheetState
 
                 // ── Results list ─────────────────────────────────────────────
                 Flexible(
-                  child: searchState.suggestions.isEmpty &&
-                          !searchState.isLoading
-                      ? _EmptyState(hasQuery: _controller.text.isNotEmpty)
+                  child: (_controller.text.trim().isEmpty ||
+                          (searchState.suggestions.isEmpty &&
+                              !searchState.isLoading))
+                      ? _EmptyState(hasQuery: _controller.text.trim().isNotEmpty)
                       : ListView.separated(
                           padding: const EdgeInsets.only(
                               left: 20, right: 20, bottom: 32),
-                          itemCount: searchState.suggestions.length,
+                          itemCount: _controller.text.trim().isNotEmpty
+                              ? searchState.suggestions.length
+                              : 0,
                           separatorBuilder: (_, __) =>
                               const Divider(height: 1, color: Color(0xFFF3F4F6)),
                           itemBuilder: (BuildContext context, int index) {

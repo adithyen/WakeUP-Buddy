@@ -58,7 +58,7 @@ class _MapViewState extends ConsumerState<MapView> {
     super.dispose();
   }
 
-  void _syncNativeOlaState(Color accent) {
+  void _syncNativeOlaState(Color accent, [LatLng? userLocation]) {
     if (_nativeOlaController == null) return;
     final hex =
         '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
@@ -71,6 +71,8 @@ class _MapViewState extends ConsumerState<MapView> {
         radiusMeters: widget.alertRadius ?? 500,
         colorHex: hex,
       );
+    } else {
+      _nativeOlaController!.clearDestination();
     }
 
     // Route points polyline
@@ -84,20 +86,34 @@ class _MapViewState extends ConsumerState<MapView> {
         width: 6.0,
       );
       _nativeOlaController!.fitBounds(points: points, padding: 120);
+    } else {
+      _nativeOlaController!.clearRoute();
     }
 
     // User location
-    final userPos = _lastKnownLocation;
+    final userPos = userLocation ?? _lastKnownLocation;
     if (userPos != null) {
+      _lastKnownLocation = userPos;
       _nativeOlaController!.updateUserLocation(
         lat: userPos.latitude,
         lng: userPos.longitude,
         colorHex: hex,
       );
+    } else {
+      Geolocator.getLastKnownPosition().then((pos) {
+        if (pos != null && _nativeOlaController != null) {
+          _lastKnownLocation = LatLng(pos.latitude, pos.longitude);
+          _nativeOlaController!.updateUserLocation(
+            lat: pos.latitude,
+            lng: pos.longitude,
+            colorHex: hex,
+          );
+        }
+      });
     }
   }
 
-  void _syncNativeVelaState(Color accent) {
+  void _syncNativeVelaState(Color accent, [LatLng? userLocation]) {
     final controller = _nativeVelaController;
     if (controller == null) return;
     final hex =
@@ -109,6 +125,8 @@ class _MapViewState extends ConsumerState<MapView> {
         radiusMeters: widget.alertRadius ?? 500,
         colorHex: hex,
       );
+    } else {
+      controller.clearDestination();
     }
     if (widget.routePoints != null && widget.routePoints!.isNotEmpty) {
       final points = widget.routePoints!
@@ -116,13 +134,28 @@ class _MapViewState extends ConsumerState<MapView> {
           .toList(growable: false);
       controller.drawRoute(points: points, colorHex: hex, width: 6);
       controller.fitBounds(points: points, padding: 120);
+    } else {
+      controller.clearRoute();
     }
-    if (_lastKnownLocation != null) {
+    final userPos = userLocation ?? _lastKnownLocation;
+    if (userPos != null) {
+      _lastKnownLocation = userPos;
       controller.updateUserLocation(
-        lat: _lastKnownLocation!.latitude,
-        lng: _lastKnownLocation!.longitude,
+        lat: userPos.latitude,
+        lng: userPos.longitude,
         colorHex: hex,
       );
+    } else {
+      Geolocator.getLastKnownPosition().then((pos) {
+        if (pos != null && _nativeVelaController != null) {
+          _lastKnownLocation = LatLng(pos.latitude, pos.longitude);
+          _nativeVelaController!.updateUserLocation(
+            lat: pos.latitude,
+            lng: pos.longitude,
+            colorHex: hex,
+          );
+        }
+      });
     }
   }
 
@@ -137,33 +170,62 @@ class _MapViewState extends ConsumerState<MapView> {
       final bounds = LatLngBounds.fromPoints(widget.routePoints!);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (ref.read(mapRendererProvider) != MapRendererType.vela) {
-          _mapController.fitCamera(
-            CameraFit.bounds(
-              bounds: bounds,
-              padding: const EdgeInsets.only(
-                left: 60,
-                right: 60,
-                top: 100,
-                bottom: 260,
+        if (ref.read(mapRendererProvider) == MapRendererType.osm) {
+          try {
+            _mapController.fitCamera(
+              CameraFit.bounds(
+                bounds: bounds,
+                padding: const EdgeInsets.only(
+                  left: 60,
+                  right: 60,
+                  top: 100,
+                  bottom: 260,
+                ),
               ),
-            ),
-          );
+            );
+          } catch (_) {}
         }
       });
     } else if (widget.destinationMarker != null &&
         widget.destinationMarker != oldWidget.destinationMarker) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (ref.read(mapRendererProvider) != MapRendererType.vela) {
-          _mapController.move(widget.destinationMarker!, widget.initialZoom);
+        if (ref.read(mapRendererProvider) == MapRendererType.osm) {
+          try {
+            _mapController.move(widget.destinationMarker!, widget.initialZoom);
+          } catch (_) {}
         }
         _nativeOlaController?.moveCamera(
           lat: widget.destinationMarker!.latitude,
           lng: widget.destinationMarker!.longitude,
           zoom: widget.initialZoom,
         );
+        _nativeVelaController?.moveCamera(
+          lat: widget.destinationMarker!.latitude,
+          lng: widget.destinationMarker!.longitude,
+          zoom: widget.initialZoom,
+        );
       });
+    } else if (oldWidget.destinationMarker != null &&
+        widget.destinationMarker == null) {
+      // Destination cleared! Center back on user location
+      if (_lastKnownLocation != null) {
+        if (ref.read(mapRendererProvider) == MapRendererType.osm) {
+          try {
+            _mapController.move(_lastKnownLocation!, 15.0);
+          } catch (_) {}
+        }
+        _nativeOlaController?.moveCamera(
+          lat: _lastKnownLocation!.latitude,
+          lng: _lastKnownLocation!.longitude,
+          zoom: 15.0,
+        );
+        _nativeVelaController?.moveCamera(
+          lat: _lastKnownLocation!.latitude,
+          lng: _lastKnownLocation!.longitude,
+          zoom: 15.0,
+        );
+      }
     }
   }
 
@@ -186,13 +248,20 @@ class _MapViewState extends ConsumerState<MapView> {
       AsyncValue<LatLng?> next,
     ) {
       final LatLng? point = next.valueOrNull;
-      if (point == null || point == _lastKnownLocation) return;
+      if (point == null) return;
       _lastKnownLocation = point;
-      if (renderer != MapRendererType.vela &&
-          widget.followUser &&
-          widget.destinationMarker == null) {
-        _mapController.move(point, _mapController.camera.zoom);
+      if (widget.followUser && widget.destinationMarker == null) {
+        if (renderer == MapRendererType.osm) {
+          try {
+            _mapController.move(point, _mapController.camera.zoom);
+          } catch (_) {}
+        }
         _nativeOlaController?.moveCamera(
+          lat: point.latitude,
+          lng: point.longitude,
+          zoom: 15.0,
+        );
+        _nativeVelaController?.moveCamera(
           lat: point.latitude,
           lng: point.longitude,
           zoom: 15.0,
@@ -230,8 +299,22 @@ class _MapViewState extends ConsumerState<MapView> {
       }
       if (point != null) {
         _lastKnownLocation = point;
-        if (renderer != MapRendererType.vela) {
-          _mapController.move(point, 16.0);
+        final hex =
+            '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+        _nativeOlaController?.updateUserLocation(
+          lat: point.latitude,
+          lng: point.longitude,
+          colorHex: hex,
+        );
+        _nativeVelaController?.updateUserLocation(
+          lat: point.latitude,
+          lng: point.longitude,
+          colorHex: hex,
+        );
+        if (renderer == MapRendererType.osm) {
+          try {
+            _mapController.move(point, 16.0);
+          } catch (_) {}
         }
         _nativeOlaController?.moveCamera(
           lat: point.latitude,
@@ -269,6 +352,23 @@ class _MapViewState extends ConsumerState<MapView> {
       accent,
     );
 
+    final LatLng? liveLoc = currentLocation.valueOrNull;
+    if (liveLoc != null && liveLoc != _lastKnownLocation) {
+      _lastKnownLocation = liveLoc;
+      final hex =
+          '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+      _nativeOlaController?.updateUserLocation(
+        lat: liveLoc.latitude,
+        lng: liveLoc.longitude,
+        colorHex: hex,
+      );
+      _nativeVelaController?.updateUserLocation(
+        lat: liveLoc.latitude,
+        lng: liveLoc.longitude,
+        colorHex: hex,
+      );
+    }
+
     if (renderer == MapRendererType.vela && !kIsWeb && Platform.isAndroid) {
       return NativeVelaMapView(
         initialLat: fallbackCenter.latitude,
@@ -278,9 +378,39 @@ class _MapViewState extends ConsumerState<MapView> {
             ? ApiConstants.velaDarkStyle
             : ApiConstants.velaLightStyle,
         fallback: flutterMapFallback,
-        onMapReady: (controller) {
+        onMapReady: (controller) async {
           _nativeVelaController = controller;
-          _syncNativeVelaState(accent);
+          LatLng? userLoc = currentLocation.valueOrNull ?? _lastKnownLocation;
+          if (userLoc == null) {
+            try {
+              final pos = await Geolocator.getLastKnownPosition() ??
+                  await Geolocator.getCurrentPosition(
+                    locationSettings: const LocationSettings(
+                      accuracy: LocationAccuracy.high,
+                      timeLimit: Duration(seconds: 4),
+                    ),
+                  );
+              userLoc = LatLng(pos.latitude, pos.longitude);
+              _lastKnownLocation = userLoc;
+            } catch (_) {}
+          }
+          final hex =
+              '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+          if (userLoc != null) {
+            controller.updateUserLocation(
+              lat: userLoc.latitude,
+              lng: userLoc.longitude,
+              colorHex: hex,
+            );
+            if (widget.destinationMarker == null) {
+              controller.moveCamera(
+                lat: userLoc.latitude,
+                lng: userLoc.longitude,
+                zoom: widget.initialZoom,
+              );
+            }
+          }
+          _syncNativeVelaState(accent, userLoc);
         },
       );
     }
@@ -297,9 +427,39 @@ class _MapViewState extends ConsumerState<MapView> {
         apiKey: apiKey,
         styleUrl: styleUrl,
         fallback: flutterMapFallback,
-        onMapReady: (controller) {
+        onMapReady: (controller) async {
           _nativeOlaController = controller;
-          _syncNativeOlaState(accent);
+          LatLng? userLoc = currentLocation.valueOrNull ?? _lastKnownLocation;
+          if (userLoc == null) {
+            try {
+              final pos = await Geolocator.getLastKnownPosition() ??
+                  await Geolocator.getCurrentPosition(
+                    locationSettings: const LocationSettings(
+                      accuracy: LocationAccuracy.high,
+                      timeLimit: Duration(seconds: 4),
+                    ),
+                  );
+              userLoc = LatLng(pos.latitude, pos.longitude);
+              _lastKnownLocation = userLoc;
+            } catch (_) {}
+          }
+          final hex =
+              '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+          if (userLoc != null) {
+            controller.updateUserLocation(
+              lat: userLoc.latitude,
+              lng: userLoc.longitude,
+              colorHex: hex,
+            );
+            if (widget.destinationMarker == null) {
+              controller.moveCamera(
+                lat: userLoc.latitude,
+                lng: userLoc.longitude,
+                zoom: widget.initialZoom,
+              );
+            }
+          }
+          _syncNativeOlaState(accent, userLoc);
         },
         onMapError: () {
           if (mounted) {

@@ -74,6 +74,22 @@ class VelaMapController {
       'padding': padding,
     });
   }
+
+  Future<void> clearRoute() async {
+    try {
+      await _channel.invokeMethod('clearRoute');
+    } catch (e) {
+      debugPrint('[VelaMapController] clearRoute error: $e');
+    }
+  }
+
+  Future<void> clearDestination() async {
+    try {
+      await _channel.invokeMethod('clearDestination');
+    } catch (e) {
+      debugPrint('[VelaMapController] clearDestination error: $e');
+    }
+  }
 }
 
 class NativeVelaMapView extends StatefulWidget {

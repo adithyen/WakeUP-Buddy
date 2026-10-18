@@ -2,7 +2,7 @@ name: wakeup_buddy
 description: "A smart location-based alarm for commuters. Never miss your stop again."
 publish_to: 'none'
 
-version: 0.6.12+12
+version: 0.6.16+16
 
 environment:
   sdk: '>=3.10.0 <4.0.0'

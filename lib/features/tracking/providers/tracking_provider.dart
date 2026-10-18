@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../../core/services/ola_maps_service.dart';
+import '../../../core/services/sensor_speed_service.dart';
 import '../../alert_config/data/models/alert_settings.dart';
 import '../../destination/data/models/destination.dart';
 import '../../destination/data/models/place_suggestion.dart';
@@ -13,16 +15,18 @@ import '../services/tracking_service.dart';
 
 final trackingProvider = StateNotifierProvider<TrackingNotifier, TripState>((ref) {
   final olaService = ref.watch(olaMapsServiceProvider);
-  return TrackingNotifier(olaService: olaService);
+  return TrackingNotifier(olaService: olaService, ref: ref);
 });
 
 class TrackingNotifier extends StateNotifier<TripState> {
   final OlaMapsService _olaService;
+  final Ref _ref;
   DateTime? _lastRerouteTime;
   bool _isRerouting = false;
 
-  TrackingNotifier({required OlaMapsService olaService})
+  TrackingNotifier({required OlaMapsService olaService, required Ref ref})
       : _olaService = olaService,
+        _ref = ref,
         super(const TripState()) {
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     unawaited(_restoreActiveTrip());
@@ -128,8 +132,22 @@ class TrackingNotifier extends StateNotifier<TripState> {
     if (state.routePolyline.isNotEmpty) {
       effectiveDistance = _calculateRemainingRouteDistance(currentPos, state.routePolyline);
 
-      // 2. Off-route / bus diversion check
+      // 2. Off-route / driver diversion check
       _checkAndRerouteIfDiverted(currentPos);
+    }
+
+    // 3. Sensor speed fusion (walking stride cadence and slow traffic detection)
+    final speedTelemetry = _ref.read(speedTelemetryProvider);
+    final double rawSpeedMs = speed ?? 0.0;
+    final double effectiveSpeedMs;
+    if (speedTelemetry.motionPhase == MotionPhase.walking && rawSpeedMs < 1.2) {
+      effectiveSpeedMs = speedTelemetry.speedKmh / 3.6;
+    } else if (rawSpeedMs > 0.3) {
+      effectiveSpeedMs = rawSpeedMs;
+    } else if (speedTelemetry.speedKmh > 0.5) {
+      effectiveSpeedMs = speedTelemetry.speedKmh / 3.6;
+    } else {
+      effectiveSpeedMs = 0.0;
     }
 
     final double alertRadius = state.alertSettings?.alertRadiusMeters ?? 500;
@@ -153,7 +171,7 @@ class TrackingNotifier extends StateNotifier<TripState> {
       initialDistanceMeters: state.initialDistanceMeters ?? effectiveDistance,
       currentLatitude: latitude,
       currentLongitude: longitude,
-      currentSpeedMs: speed,
+      currentSpeedMs: effectiveSpeedMs,
       gpsAccuracyMeters: accuracy,
       lastUpdate: timestamp ?? DateTime.now(),
       breadcrumbs: breadcrumbs.length > 200
@@ -189,28 +207,60 @@ class TrackingNotifier extends StateNotifier<TripState> {
   }
 
   void _checkAndRerouteIfDiverted(LatLng currentPos) {
-    if (_isRerouting || state.destination == null) return;
+    if (_isRerouting || state.destination == null || state.routePolyline.isEmpty) return;
 
     final dest = LatLng(state.destination!.latitude, state.destination!.longitude);
     const dist = Distance();
 
-    // Check distance to closest polyline vertex
-    double minVertexDist = double.infinity;
-    for (final pt in state.routePolyline) {
-      final d = dist.as(LengthUnit.Meter, currentPos, pt);
-      if (d < minVertexDist) {
-        minVertexDist = d;
+    // Check minimum perpendicular distance to any road segment on the polyline
+    double minDistance = double.infinity;
+    if (state.routePolyline.length == 1) {
+      minDistance = dist.as(LengthUnit.Meter, currentPos, state.routePolyline.first);
+    } else {
+      for (int i = 0; i < state.routePolyline.length - 1; i++) {
+        final p1 = state.routePolyline[i];
+        final p2 = state.routePolyline[i + 1];
+        final d = _pointToSegmentDistanceMeters(currentPos, p1, p2);
+        if (d < minDistance) {
+          minDistance = d;
+        }
       }
     }
 
-    // If diverged by more than 75m, trigger dynamic rerouting
-    if (minVertexDist > 75.0) {
+    // If diverged by more than 65m, trigger dynamic rerouting
+    if (minDistance > 65.0) {
+      if (!state.isOffRoute) {
+        state = state.copyWith(isOffRoute: true);
+      }
       final now = DateTime.now();
-      if (_lastRerouteTime == null || now.difference(_lastRerouteTime!).inSeconds > 15) {
+      if (_lastRerouteTime == null || now.difference(_lastRerouteTime!).inSeconds > 12) {
         _lastRerouteTime = now;
         _performDynamicReroute(currentPos, dest);
       }
+    } else if (state.isOffRoute) {
+      state = state.copyWith(isOffRoute: false);
     }
+  }
+
+  double _pointToSegmentDistanceMeters(LatLng p, LatLng a, LatLng b) {
+    const dist = Distance();
+    final double radLat = a.latitude * (pi / 180.0);
+    final double cosLat = cos(radLat);
+    final double dx = (b.longitude - a.longitude) * cosLat;
+    final double dy = b.latitude - a.latitude;
+    final double lenSq = dx * dx + dy * dy;
+
+    if (lenSq == 0.0) {
+      return dist.as(LengthUnit.Meter, p, a);
+    }
+
+    final double px = (p.longitude - a.longitude) * cosLat;
+    final double py = p.latitude - a.latitude;
+    final double t = ((px * dx + py * dy) / lenSq).clamp(0.0, 1.0);
+
+    final double projLat = a.latitude + t * (b.latitude - a.latitude);
+    final double projLng = a.longitude + t * (b.longitude - a.longitude);
+    return dist.as(LengthUnit.Meter, p, LatLng(projLat, projLng));
   }
 
   Future<void> _performDynamicReroute(LatLng currentPos, LatLng destination) async {
@@ -228,6 +278,7 @@ class TrackingNotifier extends StateNotifier<TripState> {
           routePolyline: newRoute.polyline,
           routeDurationSeconds: newRoute.durationSeconds,
           routeDistanceMeters: newRoute.distanceMeters,
+          currentDistanceMeters: newRoute.distanceMeters.toDouble(),
           isOffRoute: false,
         );
       }

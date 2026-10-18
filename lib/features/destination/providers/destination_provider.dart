@@ -26,7 +26,7 @@ final placesRepositoryProvider = Provider<PlacesRepository>((ref) {
   return CompositePlacesRepository(olaRepo: olaRepo, nominatimRepo: nominatim);
 });
 
-final destinationSearchProvider = StateNotifierProvider<DestinationSearchNotifier, DestinationSearchState>((ref) {
+final destinationSearchProvider = StateNotifierProvider.autoDispose<DestinationSearchNotifier, DestinationSearchState>((ref) {
   return DestinationSearchNotifier(ref.watch(placesRepositoryProvider));
 });
 
@@ -66,29 +66,32 @@ class DestinationSearchState {
 class DestinationSearchNotifier extends StateNotifier<DestinationSearchState> {
   final PlacesRepository _repository;
   Timer? _debounce;
+  int _currentRequestId = 0;
 
   DestinationSearchNotifier(this._repository) : super(const DestinationSearchState());
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _currentRequestId++;
     super.dispose();
   }
 
-  /// Called on each keystroke — debounces 400ms before firing the API call.
+  /// Called on each keystroke — debounces 350ms before firing the API call.
   void autocomplete(String query, {double? nearLat, double? nearLng}) {
     _debounce?.cancel();
     final String trimmed = query.trim();
 
     if (trimmed.isEmpty) {
-      state = const DestinationSearchState();
+      clear();
       return;
     }
 
     state = state.copyWith(query: trimmed, isLoading: true, clearError: true);
 
-    _debounce = Timer(const Duration(milliseconds: 400), () {
-      _doSearch(trimmed, nearLat: nearLat, nearLng: nearLng);
+    final int reqId = ++_currentRequestId;
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      _doSearch(trimmed, reqId, nearLat: nearLat, nearLng: nearLng);
     });
   }
 
@@ -96,36 +99,41 @@ class DestinationSearchNotifier extends StateNotifier<DestinationSearchState> {
     _debounce?.cancel();
     final String trimmed = query.trim();
     if (trimmed.isEmpty) {
-      state = state.copyWith(query: trimmed, suggestions: const <PlaceSuggestion>[], isLoading: false, clearError: true);
+      clear();
       return;
     }
+    final int reqId = ++_currentRequestId;
     state = state.copyWith(query: trimmed, isLoading: true, clearError: true);
-    await _doSearch(trimmed, nearLat: nearLat, nearLng: nearLng);
+    await _doSearch(trimmed, reqId, nearLat: nearLat, nearLng: nearLng);
   }
 
-  Future<void> _doSearch(String query, {double? nearLat, double? nearLng}) async {
+  Future<void> _doSearch(String query, int reqId, {double? nearLat, double? nearLng}) async {
     try {
       final List<PlaceSuggestion> suggestions = await _repository.searchPlaces(
         query,
         nearLat: nearLat,
         nearLng: nearLng,
       );
-      if (mounted) {
-        state = state.copyWith(suggestions: suggestions, isLoading: false);
+      // Discard responses if another search was triggered or if query was cleared
+      if (!mounted || reqId != _currentRequestId || state.query.trim().isEmpty) {
+        return;
       }
+      state = state.copyWith(suggestions: suggestions, isLoading: false);
     } catch (error) {
-      if (mounted) {
-        state = state.copyWith(
-          suggestions: const <PlaceSuggestion>[],
-          isLoading: false,
-          errorMessage: 'Unable to search places right now.',
-        );
+      if (!mounted || reqId != _currentRequestId) {
+        return;
       }
+      state = state.copyWith(
+        suggestions: const <PlaceSuggestion>[],
+        isLoading: false,
+        errorMessage: 'Unable to search places right now.',
+      );
     }
   }
 
   void clear() {
     _debounce?.cancel();
+    _currentRequestId++;
     state = const DestinationSearchState();
   }
 }

@@ -21,11 +21,29 @@ import '../../tracking/providers/tracking_provider.dart';
 import '../providers/map_provider.dart';
 import 'widgets/map_view.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _requestLocationIfNeeded();
+  }
+
+  Future<void> _requestLocationIfNeeded() async {
+    final status = await Geolocator.checkPermission();
+    if (status == LocationPermission.denied) {
+      await Geolocator.requestPermission();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final destination = ref.watch(selectedDestinationProvider);
     final alertSettings = ref.watch(alertConfigProvider);
     final TripState trackingState = ref.watch(trackingProvider);
@@ -42,11 +60,21 @@ class HomeScreen extends ConsumerWidget {
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      child: Scaffold(
-        backgroundColor: context.appBackground,
-        body: OrientationBuilder(
-          builder: (context, orientation) {
-            final isLandscape = orientation == Orientation.landscape;
+      child: PopScope(
+        canPop: destination == null,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          if (destination != null) {
+            HapticFeedback.lightImpact();
+            ref.read(selectedDestinationProvider.notifier).clear();
+            ref.read(routeSelectionProvider.notifier).clear();
+          }
+        },
+        child: Scaffold(
+          backgroundColor: context.appBackground,
+          body: OrientationBuilder(
+            builder: (context, orientation) {
+              final isLandscape = orientation == Orientation.landscape;
 
             return Stack(
               children: <Widget>[
@@ -180,7 +208,8 @@ class HomeScreen extends ConsumerWidget {
           },
         ),
       ),
-    );
+    ),
+  );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -195,117 +224,141 @@ class HomeScreen extends ConsumerWidget {
     bool isLandscape,
     Color accent,
   ) {
+    // Deduplicate trips by name and coordinates
+    final uniqueTrips = <TripRecord>[];
+    final seen = <String>{};
+    for (final trip in recentTrips) {
+      final key =
+          '${trip.destinationName.trim().toLowerCase()}_${trip.destinationLat.toStringAsFixed(3)}_${trip.destinationLng.toStringAsFixed(3)}';
+      if (seen.add(key)) {
+        uniqueTrips.add(trip);
+      }
+    }
+    final displayTrips = uniqueTrips.take(3).toList();
+
+    void openHistory() {
+      HapticFeedback.lightImpact();
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
+      );
+    }
+
     return Positioned(
       left: isLandscape ? MediaQuery.of(context).size.width * 0.15 : 0,
       right: isLandscape ? MediaQuery.of(context).size.width * 0.15 : 0,
       bottom: 0,
-      child: Container(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * (isLandscape ? 0.55 : 0.42),
-        ),
-        padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 16),
-        decoration: BoxDecoration(
-          color: context.appCard,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          border: Border.all(color: context.appBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: context.isDarkMode ? 0.5 : 0.1),
-              blurRadius: 30,
-              offset: const Offset(0, -6),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Drag handle
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: context.appBorder,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragEnd: (details) {
+          if (details.primaryVelocity != null && details.primaryVelocity! < -80) {
+            openHistory();
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.only(left: 20, right: 20, top: 12, bottom: 16),
+          decoration: BoxDecoration(
+            color: context.appCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(color: context.appBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: context.isDarkMode ? 0.5 : 0.1),
+                blurRadius: 30,
+                offset: const Offset(0, -6),
               ),
-            ),
-            const SizedBox(height: 14),
-
-            // Header: "Recent places" with clock icon
-            Row(
-              children: [
-                Icon(
-                  Icons.history_rounded,
-                  color: accent,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Recent places',
-                  style: TextStyle(
-                    color: context.appTextPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: context.appBorder,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 14),
 
-            const SizedBox(height: 12),
-
-            // Dynamic List or Polished Empty State for New User
-            Expanded(
-              child: recentTrips.isEmpty
-                  ? _buildNewUserEmptyState(context, accent)
-                  : ListView.separated(
-                      padding: EdgeInsets.zero,
-                      itemCount: recentTrips.take(4).length,
-                      separatorBuilder: (_, __) => Divider(
-                        color: context.appBorder.withValues(alpha: 0.5),
-                        height: 1,
-                      ),
-                      itemBuilder: (context, index) {
-                        final trip = recentTrips[index];
-                        return _buildRecentPlaceTile(
-                          context,
-                          ref,
-                          trip,
-                          currentLocation,
-                          accent,
-                        );
-                      },
+              // Header: "Recent places" with clock icon
+              Row(
+                children: [
+                  Icon(
+                    Icons.history_rounded,
+                    color: accent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Recent places',
+                    style: TextStyle(
+                      color: context.appTextPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
-            ),
+                  ),
+                ],
+              ),
 
-            // "Swipe up to view all history" footer
-            InkWell(
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const HistoryScreen()),
-                );
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Icon(Icons.keyboard_arrow_up_rounded, color: accent, size: 20),
-                      Text(
-                        'Swipe up to view all history',
-                        style: TextStyle(
-                          color: context.appTextSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
+              const SizedBox(height: 10),
+
+              // Dynamic List or Polished Empty State for New User
+              if (displayTrips.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: _buildNewUserEmptyState(context, accent),
+                )
+              else
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (int i = 0; i < displayTrips.length; i++) ...[
+                      if (i > 0)
+                        Divider(
+                          color: context.appBorder.withValues(alpha: 0.5),
+                          height: 1,
                         ),
+                      _buildRecentPlaceTile(
+                        context,
+                        ref,
+                        displayTrips[i],
+                        currentLocation,
+                        accent,
                       ),
                     ],
+                  ],
+                ),
+
+              // "Swipe up to view all history" footer
+              InkWell(
+                onTap: openHistory,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        Icon(Icons.keyboard_arrow_up_rounded, color: accent, size: 20),
+                        Text(
+                          'Swipe up to view all history',
+                          style: TextStyle(
+                            color: context.appTextSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -321,13 +374,14 @@ class HomeScreen extends ConsumerWidget {
     int? distKm;
     int? etaMin;
     if (currentLocation != null) {
-      final meters = const Distance().as(
+      final straightMeters = const Distance().as(
         LengthUnit.Meter,
         currentLocation,
         LatLng(trip.destinationLat, trip.destinationLng),
       );
-      distKm = (meters / 1000).round();
-      etaMin = ((meters / 6.94) / 60 + 5).round();
+      final roadMeters = (straightMeters * 1.35).round();
+      distKm = (roadMeters / 1000).round();
+      etaMin = ((roadMeters / 7.78) / 60).round();
     }
 
     return InkWell(

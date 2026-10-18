@@ -28,27 +28,47 @@ final mapTileConfigProvider = Provider<MapTileConfig>((ref) {
 });
 
 final currentLocationProvider = StreamProvider<LatLng?>((ref) async* {
-  final LocationPermission permission = await Geolocator.checkPermission();
-  final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+  LocationPermission permission = await Geolocator.checkPermission();
+
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
 
   if (!serviceEnabled ||
       permission == LocationPermission.denied ||
       permission == LocationPermission.deniedForever) {
-    yield null;
+    final Position? last = await Geolocator.getLastKnownPosition();
+    if (last != null) {
+      yield LatLng(last.latitude, last.longitude);
+    } else {
+      yield null;
+    }
     return;
   }
 
-  // Emit last-known position instantly (no GPS warm-up wait)
+  // 1. Emit last-known position instantly
   final Position? last = await Geolocator.getLastKnownPosition();
   if (last != null) {
     yield LatLng(last.latitude, last.longitude);
   }
 
-  // Then stream live updates — distanceFilter 3m for smooth tracking
+  // 2. Fetch current high accuracy position immediately
+  try {
+    final Position current = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 4),
+      ),
+    );
+    yield LatLng(current.latitude, current.longitude);
+  } catch (_) {}
+
+  // 3. Continuously stream live updates
   yield* Geolocator.getPositionStream(
     locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 3,
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 2,
     ),
   ).map((Position p) => LatLng(p.latitude, p.longitude));
 });

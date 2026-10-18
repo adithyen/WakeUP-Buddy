@@ -32,35 +32,88 @@ class OlaPlacesRepository implements PlacesRepository {
 
       if (response.statusCode == 200) {
         final List<dynamic> predictions = (response.data['predictions'] as List<dynamic>?) ?? <dynamic>[];
-        return predictions.map((dynamic raw) {
-          final Map<String, dynamic> p = raw as Map<String, dynamic>;
+
+        // Fetch real by-road distance and duration from Ola Distance Matrix API in one batch call
+        final Map<int, Map<String, int>> roadMetrics = {};
+        if (nearLat != null && nearLng != null && predictions.isNotEmpty) {
+          try {
+            final validIndices = <int>[];
+            final destStrings = <String>[];
+            for (int i = 0; i < predictions.length; i++) {
+              final p = predictions[i] as Map<String, dynamic>;
+              final lat = _toDouble(p['geometry']?['location']?['lat']);
+              final lng = _toDouble(p['geometry']?['location']?['lng']);
+              if (lat != 0.0 && lng != 0.0) {
+                validIndices.add(i);
+                destStrings.add('$lat,$lng');
+              }
+            }
+
+            if (destStrings.isNotEmpty) {
+              final dmResp = await _dio.get(
+                ApiConstants.olaDistanceMatrix,
+                queryParameters: <String, dynamic>{
+                  'origins': '$nearLat,$nearLng',
+                  'destinations': destStrings.join('|'),
+                  'api_key': _apiKey,
+                },
+              );
+
+              if (dmResp.statusCode == 200 && dmResp.data is Map<String, dynamic>) {
+                final rows = (dmResp.data['rows'] as List<dynamic>?) ?? [];
+                if (rows.isNotEmpty) {
+                  final elements = (rows.first['elements'] as List<dynamic>?) ?? [];
+                  for (int i = 0; i < elements.length && i < validIndices.length; i++) {
+                    final el = elements[i] as Map<String, dynamic>;
+                    final dist = (el['distance'] as num?)?.toInt();
+                    final dur = (el['duration'] as num?)?.toInt();
+                    if (dist != null && dur != null) {
+                      roadMetrics[validIndices[i]] = {'distance': dist, 'duration': dur};
+                    }
+                  }
+                }
+              }
+            }
+          } catch (_) {
+            // Non-blocking fallback to road-curvature estimation below
+          }
+        }
+
+        final List<PlaceSuggestion> results = <PlaceSuggestion>[];
+        for (int i = 0; i < predictions.length; i++) {
+          final Map<String, dynamic> p = predictions[i] as Map<String, dynamic>;
           final double lat = _toDouble(p['geometry']?['location']?['lat']);
           final double lng = _toDouble(p['geometry']?['location']?['lng']);
 
-          int? distanceMeters = (p['distance_meters'] as num?)?.round();
+          final metric = roadMetrics[i];
+          int? distanceMeters = metric?['distance'];
+          int? durationSeconds = metric?['duration'];
+
+          // Realistic by-road estimation fallback if distance matrix is offline
           if (distanceMeters == null && nearLat != null && nearLng != null && lat != 0.0 && lng != 0.0) {
-            distanceMeters = Geolocator.distanceBetween(nearLat, nearLng, lat, lng).round();
+            final straightMeters = Geolocator.distanceBetween(nearLat, nearLng, lat, lng);
+            distanceMeters = (straightMeters * 1.35).round();
+          }
+          if (durationSeconds == null && distanceMeters != null && distanceMeters > 0) {
+            durationSeconds = (distanceMeters / 7.78).round();
           }
 
-          int? durationSeconds;
-          if (distanceMeters != null && distanceMeters > 0) {
-            // Estimate average commute transit duration at ~25 km/h
-            durationSeconds = ((distanceMeters / 1000) / 25 * 3600).round();
-          }
-
-          return PlaceSuggestion(
-            placeId: p['place_id']?.toString() ?? '',
-            name: p['structured_formatting']?['main_text']?.toString() ?? p['description']?.toString() ?? '',
-            description: p['structured_formatting']?['secondary_text']?.toString() ?? '',
-            latitude: lat,
-            longitude: lng,
-            formattedAddress: p['description']?.toString(),
-            type: _inferPlaceType(p['types'] as List<dynamic>?),
-            source: PlaceSource.ola,
-            distanceMeters: distanceMeters,
-            durationSeconds: durationSeconds,
+          results.add(
+            PlaceSuggestion(
+              placeId: p['place_id']?.toString() ?? '',
+              name: p['structured_formatting']?['main_text']?.toString() ?? p['description']?.toString() ?? '',
+              description: p['structured_formatting']?['secondary_text']?.toString() ?? '',
+              latitude: lat,
+              longitude: lng,
+              formattedAddress: p['description']?.toString(),
+              type: _inferPlaceType(p['types'] as List<dynamic>?),
+              source: PlaceSource.ola,
+              distanceMeters: distanceMeters,
+              durationSeconds: durationSeconds,
+            ),
           );
-        }).toList(growable: false);
+        }
+        return results;
       }
 
       return <PlaceSuggestion>[];

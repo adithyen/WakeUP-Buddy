@@ -12,6 +12,7 @@ import com.ola.mapsdk.interfaces.OlaMapCallback
 import com.ola.mapsdk.model.BorderOptions
 import com.ola.mapsdk.model.OlaCircleOptions
 import com.ola.mapsdk.model.OlaLatLng
+import com.ola.mapsdk.model.OlaMarkerAnchorProperty
 import com.ola.mapsdk.model.OlaMarkerOptions
 import com.ola.mapsdk.model.OlaPolylineOptions
 import com.ola.mapsdk.view.Circle
@@ -41,6 +42,7 @@ class OlaMapPlatformView(
     private var userMarker: Marker? = null
     private var alertRadiusCircle: Circle? = null
     private var routePolyline: Polyline? = null
+    private var pendingUserLocation: Pair<OlaLatLng, String>? = null
 
     private val defaultApiKey = "CFuHbUzDL9ntSuuVkAg3rowBOA3vf7bhZotfvRdy"
 
@@ -57,7 +59,6 @@ class OlaMapPlatformView(
             val themedContext = ContextThemeWrapper(context, R.style.NormalTheme)
             val mapView = OlaMapView(themedContext)
             olaMapView = mapView
-
             val apiKey = (args?.get("apiKey") as? String)?.takeIf { it.isNotBlank() } ?: defaultApiKey
             val initialLat = (args?.get("initialLat") as? Number)?.toDouble() ?: 8.5241
             val initialLng = (args?.get("initialLng") as? Number)?.toDouble() ?: 76.9366
@@ -88,18 +89,51 @@ class OlaMapPlatformView(
                 override fun onMapReady(map: OlaMap) {
                     olaMap = map
                     try {
+                        map.showCurrentLocation()
+                    } catch (_: Throwable) {}
+
+                    try {
                         map.moveCameraToLatLong(OlaLatLng(initialLat, initialLng), initialZoom, 300)
+                    } catch (_: Throwable) {}
+
+                    pendingUserLocation?.let { (pos, color) ->
+                        try {
+                            val userPin = createPinBitmap(color, isDestination = false)
+                            val markerOptions = OlaMarkerOptions.Builder()
+                                .setMarkerId("user_marker")
+                                .setPosition(pos)
+                                .setIconBitmap(userPin)
+                                .setIconAnchor(OlaMarkerAnchorProperty.ICON_ANCHOR_CENTER)
+                                .build()
+                            userMarker = map.addMarker(markerOptions)
+                        } catch (t: Throwable) {
+                            android.util.Log.e("OlaMapPlatformView", "Failed to add initial user marker: ${t.message}")
+                        }
+                    }
+
+                    try {
+                        mapView.onStart()
+                        mapView.onResume()
                     } catch (_: Throwable) {}
 
                     methodChannel.invokeMethod("onMapReady", null)
                 }
 
                 override fun onMapError(error: String) {
+                    android.util.Log.e("OlaMapPlatformView", "onMapError: $error")
                     methodChannel.invokeMethod("onMapError", mapOf("error" to error))
                 }
             }, settings)
+
+            mapView.post {
+                try {
+                    mapView.onStart()
+                    mapView.onResume()
+                } catch (_: Throwable) {}
+            }
         } catch (t: Throwable) {
             t.printStackTrace()
+            android.util.Log.e("OlaMapPlatformView", "Initialization error: ${t.message}", t)
             olaMapView = null
             methodChannel.invokeMethod("onMapError", mapOf("error" to (t.message ?: "Failed to initialize OlaMapView")))
         }
@@ -159,6 +193,7 @@ class OlaMapPlatformView(
                             .setMarkerId("destination_marker")
                             .setPosition(OlaLatLng(lat, lng))
                             .setIconBitmap(pinBitmap)
+                            .setIconAnchor(OlaMarkerAnchorProperty.ICON_ANCHOR_BOTTOM)
                             .build()
                         destinationMarker = olaMap?.addMarker(markerOptions)
 
@@ -188,25 +223,32 @@ class OlaMapPlatformView(
             "updateUserLocation" -> {
                 val lat = (call.argument<Number>("lat"))?.toDouble()
                 val lng = (call.argument<Number>("lng"))?.toDouble()
-                val colorHex = call.argument<String>("colorHex") ?: "#00E676"
+                val colorHex = call.argument<String>("colorHex") ?: "#2979FF"
 
-                if (lat != null && lng != null && olaMap != null) {
-                    try {
-                        val pos = OlaLatLng(lat, lng)
-                        if (userMarker == null) {
+                if (lat != null && lng != null) {
+                    val pos = OlaLatLng(lat, lng)
+                    pendingUserLocation = Pair(pos, colorHex)
+                    if (olaMap != null) {
+                        try {
+                            try {
+                                userMarker?.removeMarker()
+                            } catch (_: Throwable) {}
+
                             val userPin = createPinBitmap(colorHex, isDestination = false)
                             val markerOptions = OlaMarkerOptions.Builder()
                                 .setMarkerId("user_marker")
                                 .setPosition(pos)
                                 .setIconBitmap(userPin)
+                                .setIconAnchor(OlaMarkerAnchorProperty.ICON_ANCHOR_CENTER)
                                 .build()
                             userMarker = olaMap?.addMarker(markerOptions)
-                        } else {
-                            userMarker?.setPosition(pos)
+                            result.success(true)
+                        } catch (e: Throwable) {
+                            result.error("USER_POS_ERROR", e.message, null)
                         }
+                    } else {
+                        // Map is still initializing; pendingUserLocation will be drawn in onMapReady
                         result.success(true)
-                    } catch (e: Throwable) {
-                        result.error("USER_POS_ERROR", e.message, null)
                     }
                 } else {
                     result.error("INVALID_ARGS", "Missing lat/lng", null)
@@ -289,6 +331,28 @@ class OlaMapPlatformView(
                 }
             }
 
+            "clearRoute" -> {
+                try {
+                    routePolyline?.removePolyline()
+                    routePolyline = null
+                    result.success(true)
+                } catch (e: Throwable) {
+                    result.error("CLEAR_ROUTE_ERROR", e.message, null)
+                }
+            }
+
+            "clearDestination" -> {
+                try {
+                    destinationMarker?.removeMarker()
+                    destinationMarker = null
+                    alertRadiusCircle?.removeCircle()
+                    alertRadiusCircle = null
+                    result.success(true)
+                } catch (e: Throwable) {
+                    result.error("CLEAR_DEST_ERROR", e.message, null)
+                }
+            }
+
             "clearAll" -> {
                 try {
                     destinationMarker?.removeMarker()
@@ -310,32 +374,75 @@ class OlaMapPlatformView(
     }
 
     private fun createPinBitmap(colorHex: String, isDestination: Boolean): Bitmap {
-        val size = if (isDestination) 100 else 72
+        val size = if (isDestination) 140 else 160
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val parsedColor = try {
             Color.parseColor(colorHex)
         } catch (_: Throwable) {
-            Color.parseColor("#C6FF00")
+            Color.parseColor("#2979FF")
         }
 
         val cx = size / 2f
-        val cy = size / 2f
 
-        // Outer translucent pulse halo
-        paint.color = parsedColor
-        paint.alpha = 60
-        canvas.drawCircle(cx, cy, size / 2f, paint)
+        if (isDestination) {
+            // Teardrop Map Pin shape
+            val topCy = size * 0.35f
+            val radius = size * 0.30f
 
-        // Core solid circle
-        paint.alpha = 255
-        paint.color = parsedColor
-        canvas.drawCircle(cx, cy, size / 3.2f, paint)
+            paint.color = parsedColor
+            paint.style = Paint.Style.FILL
+            canvas.drawCircle(cx, topCy, radius, paint)
 
-        // Center white core
-        paint.color = Color.WHITE
-        canvas.drawCircle(cx, cy, size / 7f, paint)
+            // Pin triangle stem pointing downwards to bottom center
+            val path = android.graphics.Path()
+            path.moveTo(cx - radius * 0.75f, topCy + radius * 0.45f)
+            path.lineTo(cx, size.toFloat() - 4f)
+            path.lineTo(cx + radius * 0.75f, topCy + radius * 0.45f)
+            path.close()
+            canvas.drawPath(path, paint)
+
+            // Inner dark contrast ring
+            paint.color = Color.BLACK
+            paint.alpha = 180
+            canvas.drawCircle(cx, topCy, radius * 0.50f, paint)
+
+            // Center solid white dot
+            paint.color = Color.WHITE
+            paint.alpha = 255
+            canvas.drawCircle(cx, topCy, radius * 0.30f, paint)
+        } else {
+            // High-visibility glowing user location puck
+            val cy = size / 2f
+
+            // Outer wide translucent radar ring
+            paint.style = Paint.Style.FILL
+            paint.color = parsedColor
+            paint.alpha = 60
+            canvas.drawCircle(cx, cy, size * 0.46f, paint)
+
+            // Mid halo ring
+            paint.alpha = 120
+            canvas.drawCircle(cx, cy, size * 0.32f, paint)
+
+            // Outer white ring border
+            paint.color = Color.WHITE
+            paint.alpha = 255
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 8f
+            canvas.drawCircle(cx, cy, size * 0.22f, paint)
+
+            // Core solid blue/accent dot
+            paint.style = Paint.Style.FILL
+            paint.color = parsedColor
+            paint.alpha = 255
+            canvas.drawCircle(cx, cy, size * 0.22f - 2f, paint)
+
+            // Center bright white pinpoint dot
+            paint.color = Color.WHITE
+            canvas.drawCircle(cx, cy, size * 0.08f, paint)
+        }
 
         return bitmap
     }

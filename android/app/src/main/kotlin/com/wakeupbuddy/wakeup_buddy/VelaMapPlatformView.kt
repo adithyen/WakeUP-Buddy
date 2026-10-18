@@ -106,6 +106,16 @@ class VelaMapPlatformView(
                 if (bounds != null) map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, call.argument<Number>("padding")?.toInt() ?: 120))
                 result.success(true)
             }
+            "clearRoute" -> {
+                routePoints = emptyList()
+                renderOverlays()
+                result.success(true)
+            }
+            "clearDestination" -> {
+                destinationPoint = null
+                renderOverlays()
+                result.success(true)
+            }
             else -> result.notImplemented()
         }
     }

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:latlong2/latlong.dart';
 
 import '../../../alert_config/data/models/alert_settings.dart';
@@ -65,22 +67,39 @@ class TripState {
       status == TripStatus.approaching ||
       status == TripStatus.alerting;
 
-  /// Traffic-aware ETA: Always returns valid duration even when speed is 0 in traffic
+  /// Traffic-aware ETA: Dynamically updates as remaining distance and live speed change
   Duration? get estimatedTimeRemaining {
-    if (routeDurationSeconds != null && routeDurationSeconds! > 0) {
-      return Duration(seconds: routeDurationSeconds!);
+    if (currentDistanceMeters == null || currentDistanceMeters! <= 0) {
+      return Duration.zero;
     }
 
-    if (currentDistanceMeters != null) {
-      // If moving, use speed; if stationary, assume average urban transit speed (25 km/h = ~6.9 m/s)
-      final speed = (currentSpeedMs != null && currentSpeedMs! > 1.5)
-          ? currentSpeedMs!
-          : 6.94;
-      final double seconds = currentDistanceMeters! / speed;
-      return Duration(seconds: seconds.round());
+    // 1. Scale route duration by remaining distance ratio
+    if (routeDurationSeconds != null &&
+        routeDurationSeconds! > 0 &&
+        initialDistanceMeters != null &&
+        initialDistanceMeters! > 0) {
+      final double ratio =
+          (currentDistanceMeters! / initialDistanceMeters!).clamp(0.0, 1.0);
+      final double scaledRouteSeconds = routeDurationSeconds! * ratio;
+
+      // If moving at vehicle speed (> 2.5 m/s = 9 km/h), blend live GPS speed
+      if (currentSpeedMs != null && currentSpeedMs! > 2.5) {
+        final double speedBasedSeconds = currentDistanceMeters! / currentSpeedMs!;
+        final double blended =
+            (scaledRouteSeconds * 0.6) + (speedBasedSeconds * 0.4);
+        return Duration(seconds: max(1, blended.round()));
+      }
+
+      return Duration(seconds: max(1, scaledRouteSeconds.round()));
     }
 
-    return null;
+    // 2. Fallback when route duration is unavailable
+    final double effectiveSpeed =
+        (currentSpeedMs != null && currentSpeedMs! > 1.5)
+            ? currentSpeedMs!
+            : 6.94;
+    final double seconds = currentDistanceMeters! / effectiveSpeed;
+    return Duration(seconds: max(1, seconds.round()));
   }
 
   double? get progress {
