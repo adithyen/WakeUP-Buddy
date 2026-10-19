@@ -18,6 +18,7 @@ final mapTileConfigProvider = Provider<MapTileConfig>((ref) {
   final MapRendererType renderer = ref.watch(mapRendererProvider);
 
   switch (renderer) {
+    case MapRendererType.tomtom:
     case MapRendererType.osm:
       return OsmTileConfig();
     case MapRendererType.vela:

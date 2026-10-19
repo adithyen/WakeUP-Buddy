@@ -28,9 +28,9 @@ class HudSpeedometer extends StatelessWidget {
 
     switch (motionPhase) {
       case MotionPhase.walking:
-        phaseIcon = Icons.directions_walk_rounded;
-        phaseText = 'Walking';
-        phaseColor = const Color(0xFF10B981); // Emerald green
+        phaseIcon = Icons.navigation_rounded;
+        phaseText = 'Moving';
+        phaseColor = accent;
         break;
       case MotionPhase.slowTraffic:
         phaseIcon = Icons.traffic_rounded;

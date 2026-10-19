@@ -34,6 +34,8 @@ class TripState {
   final int? routeDurationSeconds;
   final int? routeDistanceMeters;
   final bool isOffRoute;
+  final bool isDiverted;
+  final String? diversionReason;
   final bool gpsSignalLost;
   final bool gpsJustRecovered;
   final String? gpsLostMessage;
@@ -56,6 +58,8 @@ class TripState {
     this.routeDurationSeconds,
     this.routeDistanceMeters,
     this.isOffRoute = false,
+    this.isDiverted = false,
+    this.diversionReason,
     this.gpsSignalLost = false,
     this.gpsJustRecovered = false,
     this.gpsLostMessage,
@@ -130,6 +134,8 @@ class TripState {
     int? routeDurationSeconds,
     int? routeDistanceMeters,
     bool? isOffRoute,
+    bool? isDiverted,
+    String? diversionReason,
     bool? gpsSignalLost,
     bool? gpsJustRecovered,
     String? gpsLostMessage,
@@ -153,6 +159,8 @@ class TripState {
       routeDurationSeconds: routeDurationSeconds ?? this.routeDurationSeconds,
       routeDistanceMeters: routeDistanceMeters ?? this.routeDistanceMeters,
       isOffRoute: isOffRoute ?? this.isOffRoute,
+      isDiverted: isDiverted ?? this.isDiverted,
+      diversionReason: diversionReason ?? this.diversionReason,
       gpsSignalLost: gpsSignalLost ?? this.gpsSignalLost,
       gpsJustRecovered: gpsJustRecovered ?? this.gpsJustRecovered,
       gpsLostMessage: clearGpsLostMessage ? null : (gpsLostMessage ?? this.gpsLostMessage),

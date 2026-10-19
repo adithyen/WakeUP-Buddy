@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/constants/api_constants.dart';
 import '../../../core/services/map_api_key_provider.dart';
 import '../data/models/destination.dart';
 import '../data/models/place_suggestion.dart';
@@ -11,6 +12,7 @@ import '../data/repositories/composite_places_repository.dart';
 import '../data/repositories/nominatim_places_repository.dart';
 import '../data/repositories/ola_places_repository.dart';
 import '../data/repositories/places_repository.dart';
+import '../data/repositories/tomtom_places_repository.dart';
 
 final dioProvider = Provider<Dio>((ref) {
   return Dio();
@@ -18,12 +20,18 @@ final dioProvider = Provider<Dio>((ref) {
 
 final placesRepositoryProvider = Provider<PlacesRepository>((ref) {
   final Dio dio = ref.watch(dioProvider);
-  final String? apiKey = ref.watch(mapApiKeyProvider);
+  final String? olaApiKey = ref.watch(mapApiKeyProvider);
+  const String tomtomApiKey = ApiConstants.defaultTomTomApiKey;
 
   final NominatimPlacesRepository nominatim = NominatimPlacesRepository(dio: dio);
-  final OlaPlacesRepository? olaRepo = apiKey == null || apiKey.isEmpty ? null : OlaPlacesRepository(dio: dio, apiKey: apiKey);
+  final OlaPlacesRepository? olaRepo = olaApiKey == null || olaApiKey.isEmpty ? null : OlaPlacesRepository(dio: dio, apiKey: olaApiKey);
+  final TomTomPlacesRepository tomtomRepo = TomTomPlacesRepository(dio: dio, apiKey: tomtomApiKey);
 
-  return CompositePlacesRepository(olaRepo: olaRepo, nominatimRepo: nominatim);
+  return CompositePlacesRepository(
+    olaRepo: olaRepo,
+    tomtomRepo: tomtomRepo,
+    nominatimRepo: nominatim,
+  );
 });
 
 final destinationSearchProvider = StateNotifierProvider.autoDispose<DestinationSearchNotifier, DestinationSearchState>((ref) {

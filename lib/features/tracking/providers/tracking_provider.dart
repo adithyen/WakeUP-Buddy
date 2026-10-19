@@ -56,6 +56,8 @@ class TrackingNotifier extends StateNotifier<TripState> {
       routeDurationSeconds: chosenRoute?.durationSeconds,
       routeDistanceMeters: chosenRoute?.distanceMeters,
       initialDistanceMeters: chosenRoute?.distanceMeters.toDouble(),
+      isDiverted: chosenRoute?.isDiverted ?? false,
+      diversionReason: chosenRoute?.diversionReason,
     );
 
     final bool started = await TrackingService.startTracking(

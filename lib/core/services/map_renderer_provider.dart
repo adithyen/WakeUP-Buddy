@@ -3,15 +3,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Supported Map Rendering Engines in WakeUp-Buddy:
 /// - [ola]: Official Native Ola Maps SDK vector tiles (India-first, high accuracy)
+/// - [tomtom]: Official TomTom Map Styles v2 with live vector incidents & flow
 /// - [vela]: Vela Maps engine based on OpenFreeMap / MapLibre (https://github.com/PimpinPumpkin/Vela)
 /// - [osm]: Standard OpenStreetMap community tiles
-enum MapRendererType { ola, vela, osm }
+enum MapRendererType { ola, tomtom, vela, osm }
 
 extension MapRendererTypeExtension on MapRendererType {
   String get displayName {
     switch (this) {
       case MapRendererType.ola:
         return 'Ola Maps';
+      case MapRendererType.tomtom:
+        return 'TomTom Maps (Map Styles v2)';
       case MapRendererType.vela:
         return 'Vela Maps';
       case MapRendererType.osm:
@@ -23,6 +26,8 @@ extension MapRendererTypeExtension on MapRendererType {
     switch (this) {
       case MapRendererType.ola:
         return 'Official Ola vector tiles via native Android SDK';
+      case MapRendererType.tomtom:
+        return 'Official TomTom Map Styles v2 with live vector incidents & traffic';
       case MapRendererType.vela:
         return 'Native MapLibre vector tiles from OpenFreeMap';
       case MapRendererType.osm:
@@ -51,7 +56,9 @@ class MapRendererNotifier extends StateNotifier<MapRendererType> {
     // Keep the safe default for clean installs. Only an explicit saved
     // selection may opt back into the native Ola renderer.
     if (saved != null) {
-      if (saved == 'vela') {
+      if (saved == 'tomtom') {
+        state = MapRendererType.tomtom;
+      } else if (saved == 'vela') {
         state = MapRendererType.vela;
       } else if (saved == 'osm') {
         state = MapRendererType.osm;

@@ -201,6 +201,8 @@ extension AppThemeExtension on BuildContext {
   Color get appCard =>
       isDarkMode ? AppColors.obsidianCard : Colors.white;
 
+  Color get appSurface => appCard;
+
   Color get appCardElevated =>
       isDarkMode ? AppColors.obsidianElevated : const Color(0xFFEDF2F7);
 

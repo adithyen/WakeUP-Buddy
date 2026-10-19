@@ -12,10 +12,15 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/services/map_api_key_provider.dart';
 import '../../../../core/services/map_renderer_provider.dart';
 import '../../../../core/services/map_tile_provider.dart';
+import '../../../../core/services/tomtom_traffic_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../tracking/data/models/traffic_incident_model.dart';
+import '../../data/models/map_layers_config.dart';
+import '../../providers/map_layers_provider.dart';
 import '../../providers/map_provider.dart';
 import 'native_ola_map_view.dart';
 import 'native_vela_map_view.dart';
+import 'traffic_incident_markers.dart';
 
 class MapView extends ConsumerStatefulWidget {
   final LatLng? initialCenter;
@@ -62,6 +67,17 @@ class _MapViewState extends ConsumerState<MapView> {
     if (_nativeOlaController == null) return;
     final hex =
         '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+
+    // Dynamic style update (supporting custom dark style URL)
+    final bool isDark = ref.read(isDarkMapProvider) ||
+        ref.read(mapLayersConfigProvider).isDarkMode;
+    final String apiKey =
+        ref.read(mapApiKeyProvider) ?? ApiConstants.defaultOlaApiKey;
+    final String baseStyle = isDark
+        ? ApiConstants.olaVectorStyleDark
+        : ApiConstants.olaVectorStyleLight;
+    final String fullStyle = ApiConstants.olaStyleUrlWithApiKey(baseStyle, apiKey);
+    _nativeOlaController!.setStyleUrl(fullStyle);
 
     // Destination pin & alert radius
     if (widget.destinationMarker != null) {
@@ -118,6 +134,19 @@ class _MapViewState extends ConsumerState<MapView> {
     if (controller == null) return;
     final hex =
         '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+
+    // Dynamic style update
+    final bool isDark = ref.read(isDarkMapProvider) ||
+        ref.read(mapLayersConfigProvider).isDarkMode;
+    final MapRendererType renderer = ref.read(mapRendererProvider);
+    final String currentVelaStyle = renderer == MapRendererType.tomtom
+        ? ApiConstants.tomtomMapStyleV2(
+            apiKey: ApiConstants.defaultTomTomApiKey,
+            isDark: isDark,
+          )
+        : (isDark ? ApiConstants.velaDarkStyle : ApiConstants.velaLightStyle);
+    controller.setStyleUrl(currentVelaStyle);
+
     if (widget.destinationMarker != null) {
       controller.setDestination(
         lat: widget.destinationMarker!.latitude,
@@ -238,7 +267,8 @@ class _MapViewState extends ConsumerState<MapView> {
     );
     final String apiKey =
         ref.watch(mapApiKeyProvider) ?? ApiConstants.defaultOlaApiKey;
-    final bool isDark = ref.watch(isDarkMapProvider);
+    final MapLayersConfig layersConfig = ref.watch(mapLayersConfigProvider);
+    final bool isDark = layersConfig.isDarkMode || ref.watch(isDarkMapProvider);
     final ThemeData theme = Theme.of(context);
     final Color accent = context.appAccent;
 
@@ -343,6 +373,11 @@ class _MapViewState extends ConsumerState<MapView> {
       apiKey,
     );
 
+    final AsyncValue<List<TrafficIncident>> liveIncidentsAsync =
+        ref.watch(liveIncidentsProvider(fallbackCenter));
+    final List<TrafficIncident> liveIncidents =
+        liveIncidentsAsync.valueOrNull ?? const [];
+
     final Widget flutterMapFallback = _buildFlutterMap(
       context,
       tileConfig,
@@ -350,6 +385,8 @@ class _MapViewState extends ConsumerState<MapView> {
       fallbackCenter,
       theme,
       accent,
+      liveIncidents,
+      layersConfig,
     );
 
     final LatLng? liveLoc = currentLocation.valueOrNull;
@@ -369,6 +406,56 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     }
 
+    // 1. TomTom Maps (Official Map Styles v2 Vector via MapLibre)
+    if (renderer == MapRendererType.tomtom && !kIsWeb && Platform.isAndroid) {
+      final String tomtomStyleUrl = ApiConstants.tomtomMapStyleV2(
+        apiKey: ApiConstants.defaultTomTomApiKey,
+        isDark: isDark,
+      );
+      return NativeVelaMapView(
+        initialLat: fallbackCenter.latitude,
+        initialLng: fallbackCenter.longitude,
+        initialZoom: widget.initialZoom,
+        styleUrl: tomtomStyleUrl,
+        fallback: flutterMapFallback,
+        onMapReady: (controller) async {
+          _nativeVelaController = controller;
+          LatLng? userLoc = currentLocation.valueOrNull ?? _lastKnownLocation;
+          if (userLoc == null) {
+            try {
+              final pos = await Geolocator.getLastKnownPosition() ??
+                  await Geolocator.getCurrentPosition(
+                    locationSettings: const LocationSettings(
+                      accuracy: LocationAccuracy.high,
+                      timeLimit: Duration(seconds: 4),
+                    ),
+                  );
+              userLoc = LatLng(pos.latitude, pos.longitude);
+              _lastKnownLocation = userLoc;
+            } catch (_) {}
+          }
+          final hex =
+              '#${accent.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+          if (userLoc != null) {
+            controller.updateUserLocation(
+              lat: userLoc.latitude,
+              lng: userLoc.longitude,
+              colorHex: hex,
+            );
+            if (widget.destinationMarker == null) {
+              controller.moveCamera(
+                lat: userLoc.latitude,
+                lng: userLoc.longitude,
+                zoom: widget.initialZoom,
+              );
+            }
+          }
+          _syncNativeVelaState(accent, userLoc);
+        },
+      );
+    }
+
+    // 2. Vela Maps (MapLibre vector tiles from OpenFreeMap)
     if (renderer == MapRendererType.vela && !kIsWeb && Platform.isAndroid) {
       return NativeVelaMapView(
         initialLat: fallbackCenter.latitude,
@@ -415,7 +502,7 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     }
 
-    // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
+    // 3. Ola Maps (Genuine native Ola SDK view)
     if (renderer == MapRendererType.ola &&
         !kIsWeb &&
         Platform.isAndroid &&
@@ -471,7 +558,7 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     }
 
-    // Otherwise render high-speed FlutterMap with selected tile engine (Vela / OSM)
+    // 4. OpenStreetMap (OSM) / Raster Fallback with live TomTom Traffic & Incident Overlays
     return flutterMapFallback;
   }
 
@@ -482,6 +569,8 @@ class _MapViewState extends ConsumerState<MapView> {
     LatLng fallbackCenter,
     ThemeData theme,
     Color accent,
+    List<TrafficIncident> liveIncidents,
+    MapLayersConfig layersConfig,
   ) {
     return FlutterMap(
       mapController: _mapController,
@@ -510,6 +599,31 @@ class _MapViewState extends ConsumerState<MapView> {
           panBuffer: 2,
         ),
 
+        // TomTom Live Traffic Flow raster tiles (toggleable)
+        if (layersConfig.showTrafficFlow)
+          TileLayer(
+            urlTemplate: ApiConstants.tomtomTrafficFlowTiles(
+              ApiConstants.defaultTomTomApiKey,
+            ),
+            userAgentPackageName: 'com.wakeupbuddy.wakeup_buddy',
+            maxNativeZoom: 18,
+            keepBuffer: 2,
+            panBuffer: 2,
+          ),
+
+        // TomTom Live Traffic Incidents raster tiles (toggleable)
+        if (layersConfig.showIncidents)
+          TileLayer(
+            urlTemplate: ApiConstants.tomtomIncidentRasterTiles(
+              ApiConstants.defaultTomTomApiKey,
+              style: 's2',
+            ),
+            userAgentPackageName: 'com.wakeupbuddy.wakeup_buddy',
+            maxNativeZoom: 18,
+            keepBuffer: 2,
+            panBuffer: 2,
+          ),
+
         // Route polyline with dynamic accent color
         if (widget.routePoints != null && widget.routePoints!.isNotEmpty)
           PolylineLayer(
@@ -537,6 +651,30 @@ class _MapViewState extends ConsumerState<MapView> {
                 borderStrokeWidth: 2,
               ),
             ],
+          ),
+
+        // Live Traffic Incident Markers (Road Closures & Delay Badges)
+        if (liveIncidents.isNotEmpty &&
+            (layersConfig.showRoadClosures ||
+                layersConfig.showDelayBadges ||
+                layersConfig.showIncidents))
+          MarkerLayer(
+            markers: liveIncidents.where((incident) {
+              if (incident.isRoadClosed) return layersConfig.showRoadClosures;
+              if (incident.isJam) return layersConfig.showDelayBadges;
+              return layersConfig.showIncidents;
+            }).map((incident) {
+              return Marker(
+                point: incident.point,
+                width: incident.isRoadClosed ? 36 : 38,
+                height: incident.isRoadClosed ? 40 : 32,
+                child: TrafficIncidentMarkerWidget(
+                  incident: incident,
+                  onTap: () =>
+                      showTrafficIncidentDetailsModal(context, incident),
+                ),
+              );
+            }).toList(),
           ),
 
         // Destination pin in accent color

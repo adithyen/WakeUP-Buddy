@@ -140,29 +140,22 @@ class SpeedTelemetryNotifier extends StateNotifier<SpeedTelemetryState> {
       variance = sumSquares / _dynamicAccels.length;
     }
 
-    final bool isRhythmicWalking = _recentStepTimes.length >= 2 || (avgDynamic > 0.40 && variance > 0.06);
-
-    MotionPhase phase;
+    // Accelerometer is used for activity stillness gating, never for synthesizing artificial speed!
+    final bool isStill = avgDynamic < 0.25 && variance < 0.04;
     double currentSpeed = _filteredSpeedKmh;
 
-    if (isRhythmicWalking && currentSpeed < 8.0) {
-      phase = MotionPhase.walking;
-      // Synthesize realistic walking pace when GPS is lagging or indoors
-      if (currentSpeed < 1.8) {
-        final cadenceSteps = _recentStepTimes.length;
-        currentSpeed = (3.2 + (cadenceSteps * 0.4)).clamp(3.5, 5.5);
-      }
+    if (isStill && currentSpeed < 1.5) {
+      currentSpeed = 0.0;
+      _filteredSpeedKmh = 0.0;
+    }
+
+    final MotionPhase phase;
+    if (currentSpeed < 1.0) {
+      phase = MotionPhase.stationary;
     } else if (currentSpeed > 18.0) {
       phase = MotionPhase.transit;
-    } else if (currentSpeed >= 1.5 && currentSpeed <= 18.0) {
-      // In slow traffic: moving forward on GPS without rhythmic footsteps
-      phase = MotionPhase.slowTraffic;
     } else {
-      phase = MotionPhase.stationary;
-      if (avgDynamic < 0.20 && _recentStepTimes.isEmpty) {
-        currentSpeed = 0.0;
-        _filteredSpeedKmh = 0.0;
-      }
+      phase = MotionPhase.slowTraffic;
     }
 
     state = state.copyWith(
@@ -174,32 +167,29 @@ class SpeedTelemetryNotifier extends StateNotifier<SpeedTelemetryState> {
   }
 
   void _processGpsData(Position position) {
+    // True ground speed from GPS in km/h
     double rawKmh = (position.speed >= 0 ? position.speed : 0.0) * 3.6;
 
-    if (rawKmh < 0.5 && !state.isMoving) {
+    // Suppress GPS noise/jitter when stationary or moving like a snail (<1.2 km/h or poor accuracy)
+    if (rawKmh < 1.2 || (position.accuracy > 25.0 && rawKmh < 2.5)) {
       rawKmh = 0.0;
     }
 
     _filteredSpeedKmh =
         (_smoothingFactor * rawKmh) + ((1.0 - _smoothingFactor) * _filteredSpeedKmh);
 
-    if (_filteredSpeedKmh < 0.4 && state.motionPhase == MotionPhase.stationary) {
+    if (_filteredSpeedKmh < 0.6) {
       _filteredSpeedKmh = 0.0;
     }
 
-    double displaySpeed = _filteredSpeedKmh;
-    MotionPhase phase = state.motionPhase;
-
-    if (phase == MotionPhase.walking && displaySpeed < 1.8) {
-      displaySpeed = state.speedKmh > 0 ? state.speedKmh : 4.0;
+    final double displaySpeed = _filteredSpeedKmh;
+    final MotionPhase phase;
+    if (displaySpeed < 1.0) {
+      phase = MotionPhase.stationary;
     } else if (displaySpeed > 18.0) {
       phase = MotionPhase.transit;
-    } else if (displaySpeed >= 1.5 && displaySpeed <= 18.0) {
-      phase = (phase == MotionPhase.walking && _recentStepTimes.isNotEmpty)
-          ? MotionPhase.walking
-          : MotionPhase.slowTraffic;
     } else {
-      phase = _recentStepTimes.isNotEmpty ? MotionPhase.walking : MotionPhase.stationary;
+      phase = MotionPhase.slowTraffic;
     }
 
     state = state.copyWith(

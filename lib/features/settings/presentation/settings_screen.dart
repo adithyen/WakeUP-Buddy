@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants/api_constants.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/map_api_key_provider.dart';
 import '../../../core/services/map_renderer_provider.dart';
@@ -22,7 +23,9 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _apiKeyController;
+  late final TextEditingController _tomtomApiKeyController;
   bool _obscureKey = true;
+  bool _obscureTomTomKey = true;
   bool? _isConnected;
   bool _isChecking = false;
 
@@ -34,12 +37,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _apiKeyController = TextEditingController(
       text: ref.read(mapApiKeyProvider) ?? '',
     );
+    _tomtomApiKeyController = TextEditingController(
+      text: ApiConstants.defaultTomTomApiKey,
+    );
     _testConnection();
   }
 
   @override
   void dispose() {
     _apiKeyController.dispose();
+    _tomtomApiKeyController.dispose();
     super.dispose();
   }
 
@@ -475,7 +482,98 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           const SizedBox(height: 16),
 
-          // ── 4. DATA MANAGEMENT CARD (Matching Designs/settings.png) ────────
+          // ── 5. TOMTOM MAPS & LIVE TRAFFIC (MAP STYLES v2) ───────────────────
+          _buildSettingsCard(
+            context,
+            icon: Icons.traffic_rounded,
+            title: 'TomTom Live Traffic & Map Styles v2',
+            children: [
+              Text(
+                'Powers real-time road closures (diamond barricades), delay badges (2\', 3\', 5\'), traffic incident lines, and multi-source place search across all maps.',
+                style: TextStyle(
+                  color: context.appTextSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // API Key text input
+              Container(
+                height: 52,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: context.appCardElevated,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: context.appBorder),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _tomtomApiKeyController,
+                        obscureText: _obscureTomTomKey,
+                        style: TextStyle(
+                          color: context.appTextPrimary,
+                          fontSize: 14,
+                          letterSpacing: 2.0,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Enter TomTom API key',
+                          hintStyle: TextStyle(
+                            color: context.appTextTertiary,
+                            letterSpacing: 0,
+                          ),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        _obscureTomTomKey
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: context.appTextSecondary,
+                        size: 20,
+                      ),
+                      onPressed: () => setState(
+                          () => _obscureTomTomKey = !_obscureTomTomKey),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Live Status Dot
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF00E676),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Status: Map Styles v2 Active (2/incidents_light & dark)',
+                    style: TextStyle(
+                      color: context.appAccent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── 6. DATA MANAGEMENT CARD (Matching Designs/settings.png) ────────
           _buildSettingsCard(
             context,
             icon: Icons.storage_rounded,

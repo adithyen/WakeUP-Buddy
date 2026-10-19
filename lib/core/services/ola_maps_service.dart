@@ -95,6 +95,8 @@ class OlaRoute {
   final String readableDistance;
   final String readableDuration;
   final List<OlaRouteStep> steps;
+  final bool isDiverted;
+  final String? diversionReason;
 
   const OlaRoute({
     required this.summary,
@@ -104,6 +106,8 @@ class OlaRoute {
     required this.readableDistance,
     required this.readableDuration,
     required this.steps,
+    this.isDiverted = false,
+    this.diversionReason,
   });
 
   factory OlaRoute.fromJson(Map<String, dynamic> json) {
@@ -140,6 +144,30 @@ class OlaRoute {
       readableDistance: readDist.isNotEmpty ? readDist : '${(totalDist / 1000).toStringAsFixed(1)} km',
       readableDuration: readDur.isNotEmpty ? readDur : '${(totalDur / 60).round()} min',
       steps: stepsList,
+    );
+  }
+
+  OlaRoute copyWith({
+    String? summary,
+    List<LatLng>? polyline,
+    int? distanceMeters,
+    int? durationSeconds,
+    String? readableDistance,
+    String? readableDuration,
+    List<OlaRouteStep>? steps,
+    bool? isDiverted,
+    String? diversionReason,
+  }) {
+    return OlaRoute(
+      summary: summary ?? this.summary,
+      polyline: polyline ?? this.polyline,
+      distanceMeters: distanceMeters ?? this.distanceMeters,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      readableDistance: readableDistance ?? this.readableDistance,
+      readableDuration: readableDuration ?? this.readableDuration,
+      steps: steps ?? this.steps,
+      isDiverted: isDiverted ?? this.isDiverted,
+      diversionReason: diversionReason ?? this.diversionReason,
     );
   }
 }

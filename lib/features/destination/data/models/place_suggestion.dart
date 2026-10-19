@@ -13,7 +13,7 @@ enum PlaceType {
   other,
 }
 
-enum PlaceSource { ola, nominatim }
+enum PlaceSource { ola, tomtom, nominatim }
 
 class PlaceSuggestion {
   final String placeId;

@@ -181,6 +181,42 @@ class _ActiveTripScreenState extends ConsumerState<ActiveTripScreen>
                           ],
                         ),
                       ),
+                    if (trip.isDiverted)
+                      Container(
+                        margin: EdgeInsets.only(
+                          top: MediaQuery.of(context).padding.top + 60,
+                          left: 20,
+                          right: 20,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD32F2F),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black38,
+                              blurRadius: 8,
+                              offset: Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.block_rounded, color: Colors.white, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                trip.diversionReason ?? 'Road closed ahead — routed via live detour',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),

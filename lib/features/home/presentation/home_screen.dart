@@ -19,7 +19,9 @@ import '../../tracking/data/models/trip_state.dart';
 import '../../tracking/presentation/active_trip_screen.dart';
 import '../../tracking/providers/tracking_provider.dart';
 import '../providers/map_provider.dart';
+import 'widgets/map_layers_sheet.dart';
 import 'widgets/map_view.dart';
+import 'widgets/saved_places_carousel.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -97,23 +99,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   top: MediaQuery.of(context).padding.top + 12,
                   left: isLandscape ? 80 : 20,
                   right: isLandscape ? 80 : 20,
-                  child: _TopSearchCapsule(
-                    accentColor: accent,
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const SearchScreen(),
-                        ),
-                      );
-                    },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _TopSearchCapsule(
+                        accentColor: accent,
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SearchScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      if (destination == null) ...[
+                        const SizedBox(height: 10),
+                        const SavedPlacesCarousel(),
+                      ],
+                    ],
                   ),
                 ),
 
                 // ── 3. RIGHT FLOATING BUTTON GROUP ─────────────────────────
                 Positioned(
                   right: 20,
-                  top: MediaQuery.of(context).padding.top + 90,
+                  top: MediaQuery.of(context).padding.top + (destination == null ? 134 : 88),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -121,16 +132,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         icon: Icons.layers_rounded,
                         accentColor: accent,
                         onTap: () {
-                          HapticFeedback.selectionClick();
-                          final current = ref.read(isDarkMapProvider);
-                          ref.read(isDarkMapProvider.notifier).state = !current;
-                          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(!current ? 'Dark Map Style Active' : 'Light Map Style Active'),
-                              duration: const Duration(milliseconds: 900),
-                            ),
-                          );
+                          showMapLayersSheet(context);
                         },
                       ),
                       const SizedBox(height: 12),

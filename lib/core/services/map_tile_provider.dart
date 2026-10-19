@@ -28,7 +28,7 @@ class VelaDarkTileConfig implements MapTileConfig {
   TileProvider get tileProvider => NetworkTileProvider(
     headers: <String, String>{
       'User-Agent':
-          'WakeUpBuddy-Vela/0.6.16 (https://github.com/PimpinPumpkin/Vela)',
+          'WakeUpBuddy-Vela/0.6.18 (https://github.com/PimpinPumpkin/Vela)',
     },
   );
 }
@@ -50,7 +50,7 @@ class VelaLightTileConfig implements MapTileConfig {
   TileProvider get tileProvider => NetworkTileProvider(
     headers: <String, String>{
       'User-Agent':
-          'WakeUpBuddy-Vela/0.6.16 (https://github.com/PimpinPumpkin/Vela)',
+          'WakeUpBuddy-Vela/0.6.18 (https://github.com/PimpinPumpkin/Vela)',
     },
   );
 }
@@ -72,7 +72,7 @@ class OsmTileConfig implements MapTileConfig {
   @override
   TileProvider get tileProvider => NetworkTileProvider(
     headers: <String, String>{
-      'User-Agent': 'WakeUpBuddy/0.6.16 (support@wakeupbuddy.app)',
+      'User-Agent': 'WakeUpBuddy/0.6.18 (support@wakeupbuddy.app)',
     },
   );
 }

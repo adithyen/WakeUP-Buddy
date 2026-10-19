@@ -9,10 +9,15 @@ import '../../../../core/constants/api_constants.dart';
 import '../../../../core/services/map_api_key_provider.dart';
 import '../../../../core/services/map_renderer_provider.dart';
 import '../../../../core/services/map_tile_provider.dart';
+import '../../../../core/services/tomtom_traffic_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../home/presentation/widgets/native_ola_map_view.dart';
 import '../../../home/presentation/widgets/native_vela_map_view.dart';
+import '../../../home/presentation/widgets/traffic_incident_markers.dart';
+import '../../../home/data/models/map_layers_config.dart';
+import '../../../home/providers/map_layers_provider.dart';
 import '../../../home/providers/map_provider.dart';
+import '../../data/models/traffic_incident_model.dart';
 import '../../data/models/trip_state.dart';
 import '../../providers/tracking_provider.dart';
 
@@ -201,6 +206,12 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
     final LatLng fallbackCenter =
         userPos ?? destPos ?? const LatLng(8.5241, 76.9366);
 
+    final MapLayersConfig layersConfig = ref.watch(mapLayersConfigProvider);
+    final AsyncValue<List<TrafficIncident>> liveIncidentsAsync =
+        ref.watch(liveIncidentsProvider(fallbackCenter));
+    final List<TrafficIncident> liveIncidents =
+        liveIncidentsAsync.valueOrNull ?? const [];
+
     final Widget flutterMapFallback = RepaintBoundary(
       child: FlutterMap(
         mapController: _mapController,
@@ -224,6 +235,55 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
             keepBuffer: 2,
             panBuffer: 2,
           ),
+
+          // TomTom Live Traffic Flow raster tiles
+          if (layersConfig.showTrafficFlow)
+            TileLayer(
+              urlTemplate: ApiConstants.tomtomTrafficFlowTiles(
+                ApiConstants.defaultTomTomApiKey,
+              ),
+              userAgentPackageName: 'com.wakeupbuddy.wakeup_buddy',
+              maxNativeZoom: 18,
+              keepBuffer: 2,
+              panBuffer: 2,
+            ),
+
+          // TomTom Live Traffic Incidents raster tiles
+          if (layersConfig.showIncidents)
+            TileLayer(
+              urlTemplate: ApiConstants.tomtomIncidentRasterTiles(
+                ApiConstants.defaultTomTomApiKey,
+                style: 's2',
+              ),
+              userAgentPackageName: 'com.wakeupbuddy.wakeup_buddy',
+              maxNativeZoom: 18,
+              keepBuffer: 2,
+              panBuffer: 2,
+            ),
+
+          // Live Traffic Incident Markers (Road Closures & Delay Badges)
+          if (liveIncidents.isNotEmpty &&
+              (layersConfig.showRoadClosures ||
+                  layersConfig.showDelayBadges ||
+                  layersConfig.showIncidents))
+            MarkerLayer(
+              markers: liveIncidents.where((incident) {
+                if (incident.isRoadClosed) return layersConfig.showRoadClosures;
+                if (incident.isJam) return layersConfig.showDelayBadges;
+                return layersConfig.showIncidents;
+              }).map((incident) {
+                return Marker(
+                  point: incident.point,
+                  width: incident.isRoadClosed ? 36 : 38,
+                  height: incident.isRoadClosed ? 40 : 32,
+                  child: TrafficIncidentMarkerWidget(
+                    incident: incident,
+                    onTap: () =>
+                        showTrafficIncidentDetailsModal(context, incident),
+                  ),
+                );
+              }).toList(),
+            ),
 
           // Route polyline with dynamic accent color
           if (trip.routePolyline.isNotEmpty)
@@ -331,7 +391,26 @@ class _TripMapViewState extends ConsumerState<TripMapView> {
       ),
     );
 
-    // If user selected Ola Maps and is running on Android, use genuine native Ola SDK
+    // 1. TomTom Maps (Official Map Styles v2 Vector via MapLibre)
+    if (renderer == MapRendererType.tomtom && !kIsWeb && Platform.isAndroid) {
+      final String tomtomStyleUrl = ApiConstants.tomtomMapStyleV2(
+        apiKey: ApiConstants.defaultTomTomApiKey,
+        isDark: isDark,
+      );
+      return NativeVelaMapView(
+        initialLat: fallbackCenter.latitude,
+        initialLng: fallbackCenter.longitude,
+        initialZoom: _zoomForDistance(trip.currentDistanceMeters),
+        styleUrl: tomtomStyleUrl,
+        fallback: flutterMapFallback,
+        onMapReady: (controller) {
+          _nativeVelaController = controller;
+          _syncNativeVelaState(trip, accent);
+        },
+      );
+    }
+
+    // 2. Vela Maps (MapLibre vector tiles from OpenFreeMap)
     if (renderer == MapRendererType.vela && !kIsWeb && Platform.isAndroid) {
       return NativeVelaMapView(
         initialLat: fallbackCenter.latitude,

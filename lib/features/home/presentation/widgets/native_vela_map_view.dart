@@ -90,6 +90,14 @@ class VelaMapController {
       debugPrint('[VelaMapController] clearDestination error: $e');
     }
   }
+
+  Future<void> setStyleUrl(String styleUrl) async {
+    try {
+      await _channel.invokeMethod('setStyleUrl', {'styleUrl': styleUrl});
+    } catch (e) {
+      debugPrint('[VelaMapController] setStyleUrl error: $e');
+    }
+  }
 }
 
 class NativeVelaMapView extends StatefulWidget {
